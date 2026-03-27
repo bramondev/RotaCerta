@@ -397,10 +397,10 @@ const Home = () => {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-72 bg-secondary border-primary/20 text-white">
-              <DropdownMenuItem className="flex items-center gap-2 py-3 cursor-pointer" onClick={() => window.open('https://site-rotacerta.netlify.app/', '_blank')}>
+              <DropdownMenuItem className="flex items-center gap-2 py-3 cursor-pointer" onClick={() => window.open('https://rotacertarbf.netlify.app/', '_blank')}>
                 <Users className="w-4 h-4 text-primary" /> <span>Quem somos</span>
               </DropdownMenuItem>
-              <DropdownMenuItem className="flex items-center gap-2 py-3 cursor-pointer" onClick={() => window.open('https://site-rotacerta.netlify.app/', '_blank')}>
+              <DropdownMenuItem className="flex items-center gap-2 py-3 cursor-pointer" onClick={() => window.open('https://rotacertarbf.netlify.app/', '_blank')}>
                 <Globe className="w-4 h-4 text-primary" /> <span>Explore ferramentas!</span>
               </DropdownMenuItem>
             </DropdownMenuContent>

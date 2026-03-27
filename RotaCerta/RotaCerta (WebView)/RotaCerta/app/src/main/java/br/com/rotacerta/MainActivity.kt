@@ -16,7 +16,7 @@ import androidx.appcompat.app.AppCompatActivity
 
 class MainActivity : AppCompatActivity() {
     private lateinit var webview: WebView
-    private val baseUrl = "https://rotacerta-web.netlify.app"
+    private val baseUrl = "https://rotacertarbf.netlify.app"
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {

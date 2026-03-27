@@ -18,6 +18,9 @@ class RotaCertaApplication : Application() {
                 val targetRoute = when {
                     screen == "community" -> "/#/community"
                     launchUrl.contains("#/community") -> "/#/community"
+                    screen == "delivery-panel" -> "/#/delivery-panel"
+                    screen == "deliveries" -> "/#/delivery-panel"
+                    launchUrl.contains("#/delivery-panel") -> "/#/delivery-panel"
                     else -> null
                 }
 

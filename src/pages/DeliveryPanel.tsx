@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef } from "react";
 import { MapPin, DollarSign, Package, Loader2, Navigation, CheckCircle2, Bike } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -12,6 +12,8 @@ import NavBar from "@/components/NavBar";
 const DeliveryPanel = () => {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const hasInitializedRadarRef = useRef(false);
+  const knownDeliveryIdsRef = useRef<Set<string>>(new Set());
 
   
   const { data: availableDeliveries = [], isLoading: isLoadingRadar } = useQuery({
@@ -106,6 +108,33 @@ const DeliveryPanel = () => {
       });
     }
   });
+
+  useEffect(() => {
+    const currentIds = new Set((availableDeliveries || []).map((delivery: any) => delivery.id));
+
+    if (!hasInitializedRadarRef.current) {
+      knownDeliveryIdsRef.current = currentIds;
+      hasInitializedRadarRef.current = true;
+      return;
+    }
+
+    const newDeliveries = (availableDeliveries || []).filter(
+      (delivery: any) => !knownDeliveryIdsRef.current.has(delivery.id),
+    );
+
+    if (newDeliveries.length > 0) {
+      const newestDelivery = newDeliveries[0];
+      toast({
+        title: newDeliveries.length === 1 ? "Nova entrega no radar!" : "Novas entregas no radar!",
+        description:
+          newDeliveries.length === 1
+            ? `${newestDelivery.company_name} liberou uma corrida nova.`
+            : `${newDeliveries.length} entregas novas apareceram agora.`,
+      });
+    }
+
+    knownDeliveryIdsRef.current = currentIds;
+  }, [availableDeliveries, toast]);
 
   return (
     <div className="min-h-screen bg-black text-white pb-24 font-sans">
