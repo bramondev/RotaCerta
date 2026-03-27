@@ -1,0 +1,44 @@
+Linguagens de Programação
+
+    TypeScript: Linguagem principal para desenvolvimento do frontend, oferecendo tipagem estática sobre JavaScript.
+    JavaScript: Utilizado como base subjacente do TypeScript.
+    HTML/JSX: Para estruturação de componentes React.
+    CSS/Tailwind CSS: Para estilização da interface.
+
+IDE Principal
+
+    Visual Studio Code: IDE principal para desenvolvimento.
+
+Extensões Recomendadas para VS Code
+
+    ESLint: Análise estática de código para identificar problemas.
+    Prettier: Formatação consistente de código.
+    Tailwind CSS IntelliSense: Autocompletar e sugestões para classes Tailwind.
+    TypeScript React code snippets: Atalhos para criação de componentes React.
+    Supabase: Integração com Supabase para desenvolvimento.
+    vscode-icons ou Material Icon Theme: Ícones claros para distinguir tipos de arquivos.
+    Git Lens: Melhor integração com Git para histórico e alterações.
+    React Developer Tools: Depuração de componentes React.
+
+Funcionamento e Execução na IDE
+
+    Inicialização do Projeto:
+        Abrir o VS Code na pasta raiz do projeto.
+        Abrir terminal integrado (Ctrl+` ou Terminal > New Terminal).
+        Executar npm install para instalar dependências.
+        Executar npm run dev para iniciar o servidor de desenvolvimento.
+
+    Fluxo de Desenvolvimento:
+        Editar arquivos nas pastas src/components, src/pages, etc.
+        O servidor Vite atualiza automaticamente o navegador com as mudanças (HMR).
+        Erros de TypeScript aparecem em tempo real no editor.
+        Problemas de compilação/execução aparecem no terminal.
+        Depuração com ferramentas integradas ao navegador.
+
+    Ferramentas de Linha de Comando:
+        npm run build: Compilar para produção.
+        npm run preview: Visualizar versão de produção localmente.
+
+    Integração com Supabase:
+        Utilizar o cliente configurado em src/integrations/supabase/client.ts.
+        Acesso à API e banco de dados através dos hooks e funções fornecidas.
