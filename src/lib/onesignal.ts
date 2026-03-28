@@ -55,10 +55,10 @@ export const syncOneSignalUser = async (
   });
 };
 
-export const promptPushForMotoboyOnce = async (userType: string | null | undefined) => {
+export const promptPushPermissionOnce = async (userType: string | null | undefined) => {
   const isInitialized = await ensureOneSignalInitialized();
 
-  if (!isInitialized || userType !== "motoboy") {
+  if (!isInitialized || !userType) {
     return false;
   }
 

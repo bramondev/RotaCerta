@@ -82,8 +82,11 @@ const Community = () => {
   const [alertType, setAlertType] = useState("");
   const [selectedPhoto, setSelectedPhoto] = useState<File | null>(null);
   const [photoPreviewUrl, setPhotoPreviewUrl] = useState("");
+  const [selectedAlertPhoto, setSelectedAlertPhoto] = useState<File | null>(null);
+  const [alertPhotoPreviewUrl, setAlertPhotoPreviewUrl] = useState("");
 
   const photoInputRef = useRef<HTMLInputElement>(null);
+  const alertPhotoInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -94,6 +97,14 @@ const Community = () => {
       }
     };
   }, [photoPreviewUrl]);
+
+  useEffect(() => {
+    return () => {
+      if (alertPhotoPreviewUrl) {
+        URL.revokeObjectURL(alertPhotoPreviewUrl);
+      }
+    };
+  }, [alertPhotoPreviewUrl]);
 
   useEffect(() => {
     let isMounted = true;
@@ -148,13 +159,13 @@ const Community = () => {
         .from("profiles")
         .select("*")
         .eq("id", user.id)
-        .single();
+        .maybeSingle();
 
-      if (error && error.code !== "PGRST116") {
+      if (error) {
         throw error;
       }
 
-      return { ...data, user };
+      return { ...(data ?? {}), user };
     },
   });
 
@@ -191,18 +202,63 @@ const Community = () => {
       throw new Error("Faca login para continuar.");
     }
 
-    const { data, error } = await supabase
+    const { data: existingProfile, error: profileError } = await supabase
+      .from("profiles")
+      .select("id, full_name, username")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    if (profileError) {
+      throw profileError;
+    }
+
+    if (existingProfile) {
+      return {
+        authorName: existingProfile.username || existingProfile.full_name || "Motoca Anonimo",
+        userId: user.id,
+      };
+    }
+
+    const fallbackFullName =
+      typeof user.user_metadata?.full_name === "string"
+        ? user.user_metadata.full_name.trim()
+        : "";
+    const fallbackUsername =
+      typeof user.user_metadata?.username === "string"
+        ? user.user_metadata.username.trim()
+        : "";
+
+    const { error: insertError } = await supabase.from("profiles").insert({
+      id: user.id,
+      ...(fallbackFullName ? { full_name: fallbackFullName } : {}),
+      ...(fallbackUsername ? { username: fallbackUsername } : {}),
+    });
+
+    if (insertError && insertError.code !== "23505") {
+      throw insertError;
+    }
+
+    const { data: ensuredProfile, error: reloadError } = await supabase
       .from("profiles")
       .select("full_name, username")
       .eq("id", user.id)
-      .single();
+      .maybeSingle();
 
-    if (error && error.code !== "PGRST116") {
-      throw error;
+    if (reloadError) {
+      throw reloadError;
     }
 
+    queryClient.invalidateQueries({ queryKey: ["user-profile"] });
+    queryClient.invalidateQueries({ queryKey: ["user-profile-settings"] });
+
     return {
-      authorName: data?.username || data?.full_name || "Motoca Anonimo",
+      authorName:
+        ensuredProfile?.username ||
+        ensuredProfile?.full_name ||
+        fallbackUsername ||
+        fallbackFullName ||
+        user.email?.split("@")[0] ||
+        "Motoca Anonimo",
       userId: user.id,
     };
   };
@@ -217,6 +273,19 @@ const Community = () => {
 
     if (photoInputRef.current) {
       photoInputRef.current.value = "";
+    }
+  };
+
+  const clearSelectedAlertPhoto = () => {
+    if (alertPhotoPreviewUrl) {
+      URL.revokeObjectURL(alertPhotoPreviewUrl);
+    }
+
+    setSelectedAlertPhoto(null);
+    setAlertPhotoPreviewUrl("");
+
+    if (alertPhotoInputRef.current) {
+      alertPhotoInputRef.current.value = "";
     }
   };
 
@@ -632,8 +701,35 @@ const Community = () => {
   });
 
   const sendAlertMutation = useMutation({
-    mutationFn: async (alertData: any) => {
+    mutationFn: async ({
+      alertData,
+      imageFile,
+    }: {
+      alertData: any;
+      imageFile: File | null;
+    }) => {
       const { authorName, userId: currentUserId } = await fetchCurrentAuthor();
+
+      let imagePath: string | null = null;
+      let imageUrl: string | null = null;
+
+      if (imageFile) {
+        imagePath = buildCommunityImagePath(currentUserId, imageFile.name);
+
+        const { error: uploadError } = await supabase.storage
+          .from(COMMUNITY_IMAGE_BUCKET)
+          .upload(imagePath, imageFile, { upsert: false });
+
+        if (uploadError) {
+          throw uploadError;
+        }
+
+        const {
+          data: { publicUrl },
+        } = supabase.storage.from(COMMUNITY_IMAGE_BUCKET).getPublicUrl(imagePath);
+
+        imageUrl = publicUrl;
+      }
 
       const { data: createdAlert, error } = await supabase
         .from("community_posts")
@@ -641,6 +737,8 @@ const Community = () => {
           {
             ...alertData,
             author_name: authorName,
+            image_path: imagePath,
+            image_url: imageUrl,
             user_id: currentUserId,
           },
         ])
@@ -648,6 +746,10 @@ const Community = () => {
         .single();
 
       if (error) {
+        if (imagePath) {
+          await supabase.storage.from(COMMUNITY_IMAGE_BUCKET).remove([imagePath]);
+        }
+
         throw error;
       }
 
@@ -681,19 +783,30 @@ const Community = () => {
       }
 
       await updatePoints(10);
-      return { pushSent };
+      return { hasPhoto: Boolean(imageUrl), pushSent };
     },
-    onSuccess: ({ pushSent }: { pushSent: boolean }) => {
+    onSuccess: ({
+      hasPhoto,
+      pushSent,
+    }: {
+      hasPhoto: boolean;
+      pushSent: boolean;
+    }) => {
       setAlertContent("");
       setAlertLocation("");
       setSelectedZone("");
       setAlertType("");
+      clearSelectedAlertPhoto();
       queryClient.invalidateQueries({ queryKey: ["community_alerts"] });
       toast({
         title: "Alerta enviado!",
         description: pushSent
-          ? "Os motoboys com push ativo foram avisados. O alerta sai sozinho em 24h. +10 pontos."
-          : "O alerta foi salvo e sai sozinho em 24h. +10 pontos.",
+          ? hasPhoto
+            ? "Os motoboys com push ativo foram avisados. Foto e alerta saem sozinhos em 24h. +10 pontos."
+            : "Os motoboys com push ativo foram avisados. O alerta sai sozinho em 24h. +10 pontos."
+          : hasPhoto
+            ? "A foto com alerta foi salva e sai sozinha em 24h. +10 pontos."
+            : "O alerta foi salvo e sai sozinho em 24h. +10 pontos.",
       });
     },
     onError: (error: any) => {
@@ -769,6 +882,41 @@ const Community = () => {
 
     setSelectedPhoto(file);
     setPhotoPreviewUrl(URL.createObjectURL(file));
+  };
+
+  const handleAlertPhotoSelection = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+
+    if (!file) {
+      return;
+    }
+
+    if (!file.type.startsWith("image/")) {
+      toast({
+        title: "Formato invalido",
+        description: "Escolha uma imagem JPG, PNG ou WEBP.",
+        variant: "destructive",
+      });
+      clearSelectedAlertPhoto();
+      return;
+    }
+
+    if (file.size > MAX_COMMUNITY_IMAGE_SIZE) {
+      toast({
+        title: "Arquivo muito grande",
+        description: "A foto precisa ter no maximo 5MB.",
+        variant: "destructive",
+      });
+      clearSelectedAlertPhoto();
+      return;
+    }
+
+    if (alertPhotoPreviewUrl) {
+      URL.revokeObjectURL(alertPhotoPreviewUrl);
+    }
+
+    setSelectedAlertPhoto(file);
+    setAlertPhotoPreviewUrl(URL.createObjectURL(file));
   };
 
   const canSendAlert =
@@ -856,7 +1004,7 @@ const Community = () => {
 
                 <div className="rounded-xl border border-yellow-500/10 bg-black/40 p-3 text-[11px] text-zinc-400">
                   Posts com foto saem automaticamente em 72h. Alertas da aba vermelha saem em
-                  24h para economizar espaco no Supabase.
+                  24h. Informações falsas serão deletadas e causarão a exclusão do cadastro.
                 </div>
 
                 {photoPreviewUrl && (
@@ -880,6 +1028,7 @@ const Community = () => {
                 )}
 
                 <input
+                  id="photo-upload"
                   ref={photoInputRef}
                   type="file"
                   accept="image/*"
@@ -892,7 +1041,7 @@ const Community = () => {
                     type="button"
                     variant="outline"
                     className="border-zinc-800 bg-black text-zinc-300 hover:bg-zinc-800"
-                    onClick={() => photoInputRef.current?.click()}
+                    onClick={() => document.getElementById("photo-upload")?.click()}
                   >
                     <ImagePlus className="mr-2 h-4 w-4" />
                     Foto
@@ -933,6 +1082,298 @@ const Community = () => {
                       <Loader2 className="h-4 w-4 animate-spin" />
                     ) : (
                       <Send className="h-5 w-5" />
+                    )}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+
+            {loadingFeed ? (
+              <div className="flex justify-center py-10">
+                <Loader2 className="h-8 w-8 animate-spin text-yellow-500" />
+              </div>
+            ) : filteredAndSortedPosts.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-zinc-800 bg-zinc-900/30 p-8 text-center text-zinc-500">
+                Nenhum post no feed ainda.
+              </div>
+            ) : (
+              filteredAndSortedPosts.map((post: any) => {
+                const hasLiked = post.likes?.some((like: any) => like.user_id === userId);
+                const isMyPost = post.user_id === userId;
+                const alreadyReported = reportedPostIds.has(post.id);
+                const postAuthorName =
+                  post.profiles?.username || post.profiles?.full_name || post.author_name;
+                const isPhotoOnlyPost =
+                  Boolean(post.image_url) && post.description === PHOTO_ONLY_PLACEHOLDER;
+
+                return (
+                  <Card key={post.id} className="overflow-hidden border-zinc-800 bg-zinc-900">
+                    <div className="flex flex-row items-center gap-3 p-4 pb-2">
+                      <AvatarUI
+                        url={post.profiles?.avatar_url}
+                        name={postAuthorName}
+                        size="md"
+                      />
+                      <div className="flex flex-1 flex-col">
+                        <div className="flex items-start justify-between gap-2">
+                          <span className="text-sm font-bold text-white">{postAuthorName}</span>
+                          <div className="flex items-center gap-2">
+                            <Badge
+                              variant="outline"
+                              className="border-zinc-800 bg-black text-[9px] text-zinc-400"
+                            >
+                              {post.category}
+                            </Badge>
+                            {isMyPost && (
+                              <button
+                                onClick={() =>
+                                  confirm("Deseja apagar sua postagem? (-10 pontos)") &&
+                                  deletePostMutation.mutate(post)
+                                }
+                                className="text-zinc-600 transition-colors hover:text-red-500"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                        <span className="text-[10px] uppercase text-zinc-500">
+                          {post.created_at
+                            ? formatDistanceToNow(new Date(post.created_at), {
+                                addSuffix: true,
+                                locale: ptBR,
+                              })
+                            : "Agora"}
+                        </span>
+                      </div>
+                    </div>
+
+                    {post.description && !isPhotoOnlyPost && (
+                      <CardContent className="p-4 pt-2 text-sm leading-relaxed text-zinc-200">
+                        {post.description}
+                      </CardContent>
+                    )}
+
+                    {post.image_url && (
+                      <div
+                        className={cn(
+                          "px-4 pb-4",
+                          post.description && !isPhotoOnlyPost ? "pt-0" : "pt-2",
+                        )}
+                      >
+                        <img
+                          src={post.image_url}
+                          alt="Foto publicada na comunidade"
+                          className="max-h-[420px] w-full rounded-2xl border border-zinc-800 object-cover"
+                        />
+                      </div>
+                    )}
+
+                    <div className="flex items-center justify-between border-t border-zinc-800 p-2 px-4">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className={cn(
+                          "gap-2",
+                          hasLiked ? "text-red-500" : "text-zinc-500 hover:text-red-400",
+                        )}
+                        onClick={() => toggleLikeMutation.mutate(post)}
+                      >
+                        <Heart className={cn("h-4 w-4", hasLiked && "fill-current")} />
+                        {post.likes?.length || 0}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="gap-2 text-zinc-500 hover:text-yellow-500"
+                        onClick={() =>
+                          setCommentingOn(commentingOn === post.id ? null : post.id)
+                        }
+                      >
+                        <MessageSquare className="h-4 w-4" />
+                        {post.comments?.length || 0}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className={cn(
+                          "gap-2",
+                          alreadyReported ? "text-red-500" : "text-zinc-600 hover:text-red-400",
+                        )}
+                        onClick={() => reportPostMutation.mutate(post.id)}
+                      >
+                        <ShieldAlert className="h-4 w-4" />
+                      </Button>
+                    </div>
+
+                    {commentingOn === post.id && (
+                      <div className="space-y-3 border-t border-zinc-800/50 bg-black p-3">
+                        {post.comments?.map((comment: any) => (
+                          <div key={comment.id} className="flex gap-2">
+                            <AvatarUI
+                              url={comment.profiles?.avatar_url}
+                              name={comment.profiles?.username || comment.profiles?.full_name}
+                              size="sm"
+                            />
+                            <div className="flex-1 rounded-xl rounded-tl-none bg-zinc-900 p-2 px-3">
+                              <p className="text-xs font-bold text-zinc-300">
+                                {comment.profiles?.username || comment.profiles?.full_name}
+                              </p>
+                              <p className="mt-0.5 text-xs text-zinc-400">{comment.content}</p>
+                            </div>
+                          </div>
+                        ))}
+                        <div className="flex items-center gap-2 pt-2">
+                          <Input
+                            placeholder="Comentar..."
+                            className="h-8 flex-1 border-zinc-800 bg-zinc-900 text-xs text-white"
+                            value={commentText}
+                            onChange={(event) => setCommentText(event.target.value)}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter" && commentText.trim()) {
+                                sendCommentMutation.mutate({
+                                  content: commentText,
+                                  postId: post.id,
+                                });
+                              }
+                            }}
+                          />
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-8 w-8 text-yellow-500"
+                            onClick={() =>
+                              commentText.trim() &&
+                              sendCommentMutation.mutate({
+                                content: commentText,
+                                postId: post.id,
+                              })
+                            }
+                          >
+                            <Send className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  </Card>
+                );
+              })
+            )}
+          </TabsContent>
+
+          <TabsContent value="alerts" className="mt-4 space-y-4">
+            <Card className="border-red-500/20 bg-zinc-900">
+              <CardContent className="space-y-3 p-4">
+                <div className="rounded-xl border border-red-500/10 bg-black/40 p-3 text-[11px] text-zinc-400">
+                  Alertas publicados aqui saem automaticamente em 24h.
+                </div>
+
+                {alertPhotoPreviewUrl && (
+                  <div className="relative overflow-hidden rounded-2xl border border-zinc-800 bg-black">
+                    <img
+                      src={alertPhotoPreviewUrl}
+                      alt="Preview do alerta"
+                      className="max-h-72 w-full object-cover"
+                    />
+                    <button
+                      type="button"
+                      onClick={clearSelectedAlertPhoto}
+                      className="absolute right-3 top-3 rounded-full bg-black/80 p-2 text-white transition-colors hover:bg-red-600"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                    <div className="absolute bottom-3 left-3 rounded-full bg-black/80 px-3 py-1 text-[10px] font-bold uppercase tracking-wide text-red-400">
+                      Some em 24h
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex gap-2">
+                  <Select onValueChange={setSelectedZone} value={selectedZone}>
+                    <SelectTrigger className="w-[120px] border-zinc-800 bg-black text-xs">
+                      <SelectValue placeholder="Zona?" />
+                    </SelectTrigger>
+                    <SelectContent className="border-zinc-800 bg-zinc-900 text-white">
+                      <SelectItem value="Norte">Z. Norte</SelectItem>
+                      <SelectItem value="Leste">Z. Leste</SelectItem>
+                      <SelectItem value="Oeste">Z. Oeste</SelectItem>
+                      <SelectItem value="Sul">Z. Sul</SelectItem>
+                      <SelectItem value="Centro">Centro</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Select onValueChange={setAlertType} value={alertType}>
+                    <SelectTrigger className="flex-1 border-zinc-800 bg-black text-xs">
+                      <SelectValue placeholder="Tipo de Alerta?" />
+                    </SelectTrigger>
+                    <SelectContent className="border-zinc-800 bg-zinc-900 text-white">
+                      <SelectItem value="blitz">Blitz</SelectItem>
+                      <SelectItem value="danger">Transito/Acidente</SelectItem>
+                      <SelectItem value="restaurante">Restaurante</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <input
+                  id="alert-photo-upload"
+                  ref={alertPhotoInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={handleAlertPhotoSelection}
+                />
+
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="border-zinc-800 bg-black text-zinc-300 hover:bg-zinc-800"
+                    onClick={() => document.getElementById("alert-photo-upload")?.click()}
+                  >
+                    <ImagePlus className="mr-2 h-4 w-4" />
+                    Foto
+                  </Button>
+                  {selectedAlertPhoto && (
+                    <span className="truncate text-xs text-zinc-500">
+                      {selectedAlertPhoto.name}
+                    </span>
+                  )}
+                </div>
+
+                <Input
+                  placeholder="Localizacao (Ex: Av. Paulista)"
+                  className="h-10 border-zinc-800 bg-black text-white"
+                  value={alertLocation}
+                  onChange={(event) => setAlertLocation(event.target.value)}
+                />
+
+                <div className="flex overflow-hidden rounded-lg border border-zinc-800 bg-black pr-2">
+                  <Input
+                    placeholder="O que esta rolando?"
+                    className="border-0 bg-transparent text-white focus-visible:ring-0"
+                    value={alertContent}
+                    onChange={(event) => setAlertContent(event.target.value)}
+                  />
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="text-red-500"
+                    disabled={sendAlertMutation.isPending || !canSendAlert}
+                    onClick={() =>
+                      sendAlertMutation.mutate({
+                        alertData: {
+                          description: alertContent.trim(),
+                          location: alertLocation.trim(),
+                          type: alertType,
+                          zone: selectedZone,
+                        },
+                        imageFile: selectedAlertPhoto,
+                      })
+                    }
+                  >
+                    {sendAlertMutation.isPending ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Send className="h-4 w-4" />
                     )}
                   </Button>
                 </div>
@@ -990,6 +1431,15 @@ const Community = () => {
                       {alert.location}
                     </h3>
                     <p className="text-sm text-zinc-300">{alert.description}</p>
+                    {alert.image_url && (
+                      <div className="mt-3 overflow-hidden rounded-2xl border border-zinc-800">
+                        <img
+                          src={alert.image_url}
+                          alt="Foto do alerta"
+                          className="max-h-80 w-full object-cover"
+                        />
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
               ))

@@ -20,12 +20,12 @@ import { Toaster } from "@/components/ui/toaster";
 import { supabase } from "@/integrations/supabase/client";
 import {
   ensureOneSignalInitialized,
-  promptPushForMotoboyOnce,
+  promptPushPermissionOnce,
   syncOneSignalUser,
 } from "@/lib/onesignal";
 import {
   isAndroidNativePushAvailable,
-  promptAndroidNativePushForMotoboyOnce,
+  promptAndroidNativePushPermissionOnce,
   syncAndroidNativePushUser,
 } from "@/lib/native-push";
 import AddFuel from "@/pages/AddFuel";
@@ -413,13 +413,13 @@ function App() {
 
         if (isAndroidNativePushAvailable()) {
           await syncAndroidNativePushUser(userId, userType);
-          await promptAndroidNativePushForMotoboyOnce(userType);
+          await promptAndroidNativePushPermissionOnce(userType);
           return;
         }
 
         await ensureOneSignalInitialized();
         await syncOneSignalUser(userId, userType);
-        await promptPushForMotoboyOnce(userType);
+        await promptPushPermissionOnce(userType);
       } catch (error) {
         console.warn("Nao foi possivel sincronizar o OneSignal:", error);
       }

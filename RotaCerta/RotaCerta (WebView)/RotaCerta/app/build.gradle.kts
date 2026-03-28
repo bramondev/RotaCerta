@@ -1,5 +1,7 @@
 import java.util.Properties
 
+fun String.asBuildConfigString() = "\"${replace("\\", "\\\\").replace("\"", "\\\"")}\""
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -18,6 +20,18 @@ val hasReleaseSigning =
     keystoreProperties["keyAlias"] != null &&
     keystoreProperties["keyPassword"] != null
 
+val appBaseUrl =
+    (findProperty("ROTA_CERTA_BASE_URL") as String?)
+        ?.trim()
+        ?.takeUnless { it.isBlank() }
+        ?: "https://rotacertarbf.netlify.app"
+
+val oneSignalAppId =
+    (findProperty("ROTA_CERTA_ONE_SIGNAL_APP_ID") as String?)
+        ?.trim()
+        ?.takeUnless { it.isBlank() }
+        ?: "977604f7-a451-4b2a-8a3c-588c9f7ca553"
+
 android {
     namespace = "br.com.rotacerta"
     compileSdk = 35
@@ -28,6 +42,8 @@ android {
         targetSdk = 35
         versionCode = 3
         versionName = "1.0.2"
+        buildConfigField("String", "APP_BASE_URL", appBaseUrl.asBuildConfigString())
+        buildConfigField("String", "ONE_SIGNAL_APP_ID", oneSignalAppId.asBuildConfigString())
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -61,6 +77,9 @@ android {
     }
     kotlinOptions {
         jvmTarget = "11"
+    }
+    buildFeatures {
+        buildConfig = true
     }
 }
 

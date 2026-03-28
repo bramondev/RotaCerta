@@ -41,12 +41,12 @@ export const syncAndroidNativePushUser = async (
   return true;
 };
 
-export const promptAndroidNativePushForMotoboyOnce = async (
+export const promptAndroidNativePushPermissionOnce = async (
   userType: string | null | undefined,
 ) => {
   const bridge = getAndroidPushBridge();
 
-  if (!bridge || userType !== "motoboy") {
+  if (!bridge || !userType) {
     return false;
   }
 
