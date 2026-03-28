@@ -2,6 +2,7 @@ import {
   buildAppRouteUrl,
   corsHeaders,
   getAppIconUrl,
+  getOneSignalAppId,
   getOneSignalRestApiKey,
   sendOneSignalNotification,
 } from "../_shared/push.ts";
@@ -44,7 +45,7 @@ Deno.serve(async (request) => {
   try {
     const { appId, delivery } = (await request.json()) as DeliveryPayload;
 
-    if (!appId || !delivery?.id) {
+    if (!delivery?.id) {
       return new Response(JSON.stringify({ error: "Invalid payload" }), {
         headers: corsHeaders,
         status: 400,
@@ -52,11 +53,12 @@ Deno.serve(async (request) => {
     }
 
     const restApiKey = getOneSignalRestApiKey();
+    const oneSignalAppId = getOneSignalAppId(appId);
     const iconUrl = getAppIconUrl(request);
     const webUrl = buildAppRouteUrl(request, "/#/delivery-panel");
 
     const oneSignalResult = await sendOneSignalNotification(restApiKey, {
-      app_id: appId,
+      app_id: oneSignalAppId,
       big_picture: iconUrl,
       chrome_web_icon: iconUrl,
       contents: {

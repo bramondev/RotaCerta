@@ -31,6 +31,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { ONE_SIGNAL_APP_ID } from "@/lib/onesignal";
+import { invokeSupabaseFunction } from "@/lib/supabase-functions";
 import { cn } from "@/lib/utils";
 
 const COMMUNITY_IMAGE_BUCKET = "rotacerta_images";
@@ -120,7 +121,7 @@ const Community = () => {
 
         localStorage.setItem(COMMUNITY_CLEANUP_STORAGE_KEY, String(now));
 
-        const { data, error } = await supabase.functions.invoke("cleanup-community-posts");
+        const { data, error } = await invokeSupabaseFunction("cleanup-community-posts");
 
         if (error) {
           throw error;
@@ -565,7 +566,7 @@ const Community = () => {
       }
 
       try {
-        const { error: notificationError } = await supabase.functions.invoke(
+        const { error: notificationError } = await invokeSupabaseFunction(
           "notify-community-comment",
           {
             body: {
@@ -756,7 +757,7 @@ const Community = () => {
       let pushSent = false;
 
       try {
-        const { error: functionError } = await supabase.functions.invoke(
+        const { error: functionError } = await invokeSupabaseFunction(
           "notify-community-alert",
           {
             body: {

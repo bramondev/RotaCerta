@@ -15,6 +15,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { ONE_SIGNAL_APP_ID } from "@/lib/onesignal";
+import { invokeSupabaseFunction } from "@/lib/supabase-functions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -121,7 +122,7 @@ const AdminFretes = () => {
       let pushSent = false;
 
       try {
-        const { error: notificationError } = await supabase.functions.invoke(
+        const { error: notificationError } = await invokeSupabaseFunction(
           "notify-delivery-available",
           {
             body: {

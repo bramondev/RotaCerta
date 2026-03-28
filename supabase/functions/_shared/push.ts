@@ -36,6 +36,18 @@ export const getOneSignalRestApiKey = () => {
   return oneSignalRestApiKey;
 };
 
+export const getOneSignalAppId = (providedAppId?: string) => {
+  const oneSignalAppId =
+    Deno.env.get("ONESIGNAL_APP_ID")?.trim() ||
+    providedAppId?.trim();
+
+  if (!oneSignalAppId) {
+    throw new Error("Missing ONESIGNAL_APP_ID");
+  }
+
+  return oneSignalAppId;
+};
+
 export const sendOneSignalNotification = async (
   restApiKey: string,
   payload: OneSignalPayload,
@@ -52,7 +64,14 @@ export const sendOneSignalNotification = async (
   const oneSignalResult = await oneSignalResponse.json();
 
   if (!oneSignalResponse.ok) {
-    throw new Error(JSON.stringify(oneSignalResult));
+    const details = JSON.stringify(oneSignalResult);
+    if (oneSignalResponse.status === 401) {
+      throw new Error(
+        `OneSignal unauthorized (401). Check ONESIGNAL_REST_API_KEY and ONESIGNAL_APP_ID. Details: ${details}`,
+      );
+    }
+
+    throw new Error(details);
   }
 
   return oneSignalResult;

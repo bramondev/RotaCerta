@@ -3,6 +3,7 @@ import {
   buildAppRouteUrl,
   corsHeaders,
   getAppIconUrl,
+  getOneSignalAppId,
   getOneSignalRestApiKey,
   sendOneSignalToUsers,
 } from "../_shared/push.ts";
@@ -39,7 +40,7 @@ Deno.serve(async (request) => {
   try {
     const { actorId, appId, content, postId } = (await request.json()) as CommentPayload;
 
-    if (!actorId || !appId || !postId) {
+    if (!actorId || !postId) {
       return new Response(JSON.stringify({ error: "Invalid payload" }), {
         headers: corsHeaders,
         status: 400,
@@ -106,11 +107,12 @@ Deno.serve(async (request) => {
       "Alguem";
 
     const restApiKey = getOneSignalRestApiKey();
+    const oneSignalAppId = getOneSignalAppId(appId);
     const iconUrl = getAppIconUrl(request);
     const webUrl = buildAppRouteUrl(request, "/#/community");
 
     const result = await sendOneSignalToUsers({
-      appId,
+      appId: oneSignalAppId,
       contents: {
         en: buildCommentBody(actorName, content),
         pt: buildCommentBody(actorName, content),

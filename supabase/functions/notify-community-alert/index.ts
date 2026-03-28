@@ -1,3 +1,9 @@
+import {
+  getOneSignalAppId,
+  getOneSignalRestApiKey,
+  sendOneSignalNotification,
+} from "../_shared/push.ts";
+
 const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
@@ -43,23 +49,11 @@ Deno.serve(async (request) => {
     });
   }
 
-  const oneSignalRestApiKey = Deno.env.get("ONESIGNAL_REST_API_KEY");
-
-  if (!oneSignalRestApiKey) {
-    return new Response(
-      JSON.stringify({ error: "Missing ONESIGNAL_REST_API_KEY secret" }),
-      {
-        headers: corsHeaders,
-        status: 500,
-      },
-    );
-  }
-
   try {
     const payload = (await request.json()) as AlertPayload;
     const { appId, authorId, post } = payload;
 
-    if (!appId || !authorId || !post?.id || !post.type) {
+    if (!authorId || !post?.id || !post.type) {
       return new Response(JSON.stringify({ error: "Invalid payload" }), {
         headers: corsHeaders,
         status: 400,
@@ -75,8 +69,11 @@ Deno.serve(async (request) => {
     const communityUrl = normalizedBaseUrl ? `${normalizedBaseUrl}/#/community` : undefined;
     const communityIcon = normalizedBaseUrl ? `${normalizedBaseUrl}/Rotacertaoficial.jpg` : undefined;
 
+    const oneSignalAppId = getOneSignalAppId(appId);
+    const oneSignalRestApiKey = getOneSignalRestApiKey();
+
     const notificationPayload = {
-      app_id: appId,
+      app_id: oneSignalAppId,
       big_picture: communityIcon,
       chrome_web_icon: communityIcon,
       contents: {
@@ -112,23 +109,10 @@ Deno.serve(async (request) => {
       web_url: communityUrl,
     };
 
-    const oneSignalResponse = await fetch("https://api.onesignal.com/notifications", {
-      body: JSON.stringify(notificationPayload),
-      headers: {
-        Authorization: `Key ${oneSignalRestApiKey}`,
-        "Content-Type": "application/json; charset=utf-8",
-      },
-      method: "POST",
-    });
-
-    const oneSignalResult = await oneSignalResponse.json();
-
-    if (!oneSignalResponse.ok) {
-      return new Response(JSON.stringify({ error: oneSignalResult }), {
-        headers: corsHeaders,
-        status: oneSignalResponse.status,
-      });
-    }
+    const oneSignalResult = await sendOneSignalNotification(
+      oneSignalRestApiKey,
+      notificationPayload,
+    );
 
     return new Response(
       JSON.stringify({
