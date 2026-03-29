@@ -8,17 +8,32 @@ export const invokeSupabaseFunction = async (
   } = {},
 ) => {
   const {
-    data: { session },
+    data: { session: currentSession },
   } = await supabase.auth.getSession();
 
-  const authHeaders = session?.access_token
-    ? { Authorization: `Bearer ${session.access_token}` }
-    : {};
+  let accessToken = currentSession?.access_token;
+
+  if (!accessToken) {
+    const {
+      data: { session: refreshedSession },
+      error: refreshError,
+    } = await supabase.auth.refreshSession();
+
+    if (refreshError) {
+      throw refreshError;
+    }
+
+    accessToken = refreshedSession?.access_token;
+  }
+
+  if (!accessToken) {
+    throw new Error("Sessao expirada. Faca login novamente.");
+  }
 
   return supabase.functions.invoke(functionName, {
     ...options,
     headers: {
-      ...authHeaders,
+      Authorization: `Bearer ${accessToken}`,
       ...(options.headers ?? {}),
     },
   });
