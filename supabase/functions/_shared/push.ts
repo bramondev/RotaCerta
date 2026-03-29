@@ -55,7 +55,7 @@ export const sendOneSignalNotification = async (
   const oneSignalResponse = await fetch("https://api.onesignal.com/notifications", {
     body: JSON.stringify(payload),
     headers: {
-      Authorization: `Key ${restApiKey}`,
+      Authorization: `key ${restApiKey}`,
       "Content-Type": "application/json; charset=utf-8",
     },
     method: "POST",
