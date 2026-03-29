@@ -885,6 +885,35 @@ const Community = () => {
     setPhotoPreviewUrl(URL.createObjectURL(file));
   };
 
+  const openPostPhotoPicker = () => {
+    const input = photoInputRef.current as (HTMLInputElement & { showPicker?: () => void }) | null;
+
+    if (!input) {
+      toast({
+        title: "Erro ao abrir foto",
+        description: "Nao foi possivel abrir o seletor de imagem agora.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      if (typeof input.showPicker === "function") {
+        input.showPicker();
+        return;
+      }
+
+      input.click();
+    } catch (error) {
+      console.error("Erro ao abrir o seletor de foto do feed:", error);
+      toast({
+        title: "Erro ao abrir foto",
+        description: "Nao foi possivel abrir o seletor de imagem agora.",
+        variant: "destructive",
+      });
+    }
+  };
+
   const handleAlertPhotoSelection = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
 
@@ -918,6 +947,36 @@ const Community = () => {
 
     setSelectedAlertPhoto(file);
     setAlertPhotoPreviewUrl(URL.createObjectURL(file));
+  };
+
+  const openAlertPhotoPicker = () => {
+    const input =
+      alertPhotoInputRef.current as (HTMLInputElement & { showPicker?: () => void }) | null;
+
+    if (!input) {
+      toast({
+        title: "Erro ao abrir foto",
+        description: "Nao foi possivel abrir o seletor de imagem agora.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      if (typeof input.showPicker === "function") {
+        input.showPicker();
+        return;
+      }
+
+      input.click();
+    } catch (error) {
+      console.error("Erro ao abrir o seletor de foto dos alertas:", error);
+      toast({
+        title: "Erro ao abrir foto",
+        description: "Nao foi possivel abrir o seletor de imagem agora.",
+        variant: "destructive",
+      });
+    }
   };
 
   const canSendAlert =
@@ -1042,7 +1101,7 @@ const Community = () => {
                     type="button"
                     variant="outline"
                     className="border-zinc-800 bg-black text-zinc-300 hover:bg-zinc-800"
-                    onClick={() => document.getElementById("photo-upload")?.click()}
+                    onClick={openPostPhotoPicker}
                   >
                     <ImagePlus className="mr-2 h-4 w-4" />
                     Foto
@@ -1328,7 +1387,7 @@ const Community = () => {
                     type="button"
                     variant="outline"
                     className="border-zinc-800 bg-black text-zinc-300 hover:bg-zinc-800"
-                    onClick={() => document.getElementById("alert-photo-upload")?.click()}
+                    onClick={openAlertPhotoPicker}
                   >
                     <ImagePlus className="mr-2 h-4 w-4" />
                     Foto

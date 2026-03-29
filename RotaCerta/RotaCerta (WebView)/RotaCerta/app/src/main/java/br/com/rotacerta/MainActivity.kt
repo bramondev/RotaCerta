@@ -1,10 +1,12 @@
 package br.com.rotacerta
 
 import android.annotation.SuppressLint
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.webkit.CookieManager
+import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
@@ -12,11 +14,27 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.OnBackPressedCallback
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 
 class MainActivity : AppCompatActivity() {
     private lateinit var webview: WebView
     private val baseUrl = BuildConfig.APP_BASE_URL
+    private var pendingFileChooserCallback: ValueCallback<Array<Uri>>? = null
+    private val fileChooserLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            val callback = pendingFileChooserCallback ?: return@registerForActivityResult
+            pendingFileChooserCallback = null
+
+            val selectedFiles =
+                if (result.resultCode == RESULT_OK) {
+                    WebChromeClient.FileChooserParams.parseResult(result.resultCode, result.data)
+                } else {
+                    null
+                }
+
+            callback.onReceiveValue(selectedFiles)
+        }
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -25,7 +43,41 @@ class MainActivity : AppCompatActivity() {
 
         webview = findViewById(R.id.webview)
         webview.addJavascriptInterface(AndroidPushBridge(this), "AndroidPushBridge")
-        webview.webChromeClient = WebChromeClient()
+        webview.webChromeClient =
+            object : WebChromeClient() {
+                override fun onShowFileChooser(
+                    webView: WebView?,
+                    filePathCallback: ValueCallback<Array<Uri>>?,
+                    fileChooserParams: FileChooserParams?,
+                ): Boolean {
+                    pendingFileChooserCallback?.onReceiveValue(null)
+                    pendingFileChooserCallback = filePathCallback
+
+                    val chooserIntent =
+                        try {
+                            fileChooserParams?.createIntent()?.apply {
+                                addCategory(Intent.CATEGORY_OPENABLE)
+                            } ?: Intent(Intent.ACTION_GET_CONTENT).apply {
+                                addCategory(Intent.CATEGORY_OPENABLE)
+                                type = "image/*"
+                            }
+                        } catch (_: Exception) {
+                            pendingFileChooserCallback = null
+                            return false
+                        }
+
+                    return try {
+                        fileChooserLauncher.launch(
+                            Intent.createChooser(chooserIntent, "Selecionar imagem"),
+                        )
+                        true
+                    } catch (_: ActivityNotFoundException) {
+                        pendingFileChooserCallback?.onReceiveValue(null)
+                        pendingFileChooserCallback = null
+                        false
+                    }
+                }
+            }
         configureBackNavigation()
         webview.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {

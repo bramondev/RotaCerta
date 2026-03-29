@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { 
-  Plus, Store, Tag, Trash2, TrendingUp, Users, MessageCircle, Package, Loader2, LogOut
+  Plus, Store, Tag, Trash2, TrendingUp, Users, MessageCircle, Package, Loader2, LogOut, Camera, ImagePlus, X
 } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -22,13 +22,34 @@ import {
 } from "@/components/ui/sheet";
 import { getDefaultStoreAvatar } from "@/lib/store";
 
+const STORE_IMAGE_BUCKET = "rotacerta_images";
+const MAX_STORE_IMAGE_SIZE = 5 * 1024 * 1024;
+
+const buildStoreAssetPath = (userId: string, scope: "profile" | "offers", fileName: string) => {
+  const fileExt = fileName.split(".").pop()?.toLowerCase() || "jpg";
+  return `stores/${userId}/${scope}-${crypto.randomUUID()}.${fileExt}`;
+};
+
 const CATEGORIES = ["Óleo", "Pneus", "Freios", "Serviços", "Acessórios"];
 
 const AdminLoja = () => {
   const [isAddingOffer, setIsAddingOffer] = useState(false);
+  const [selectedOfferImage, setSelectedOfferImage] = useState<File | null>(null);
+  const [offerImagePreviewUrl, setOfferImagePreviewUrl] = useState("");
+  const [isUploadingStorePhoto, setIsUploadingStorePhoto] = useState(false);
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const storePhotoInputRef = useRef<HTMLInputElement>(null);
+  const offerPhotoInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    return () => {
+      if (offerImagePreviewUrl) {
+        URL.revokeObjectURL(offerImagePreviewUrl);
+      }
+    };
+  }, [offerImagePreviewUrl]);
 
  
   const { data: profile } = useQuery({
@@ -44,6 +65,149 @@ const AdminLoja = () => {
 
   const myShopName = profile?.full_name || "Motopeças Parceira";
   const userId = profile?.user?.id;
+
+  const clearSelectedOfferImage = () => {
+    if (offerImagePreviewUrl) {
+      URL.revokeObjectURL(offerImagePreviewUrl);
+    }
+
+    setSelectedOfferImage(null);
+    setOfferImagePreviewUrl("");
+
+    if (offerPhotoInputRef.current) {
+      offerPhotoInputRef.current.value = "";
+    }
+  };
+
+  const validateImageFile = (file: File) => {
+    if (!file.type.startsWith("image/")) {
+      throw new Error("Escolha uma imagem JPG, PNG ou WEBP.");
+    }
+
+    if (file.size > MAX_STORE_IMAGE_SIZE) {
+      throw new Error("A foto precisa ter no maximo 5MB.");
+    }
+  };
+
+  const openImagePicker = (
+    inputRef: React.RefObject<HTMLInputElement>,
+    target: "loja" | "produto",
+  ) => {
+    const input = inputRef.current as (HTMLInputElement & { showPicker?: () => void }) | null;
+
+    if (!input) {
+      toast({
+        title: "Erro ao abrir foto",
+        description: `Nao foi possivel abrir o seletor de imagem da ${target} agora.`,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      if (typeof input.showPicker === "function") {
+        input.showPicker();
+        return;
+      }
+
+      input.click();
+    } catch (error) {
+      console.error(`Erro ao abrir o seletor de foto da ${target}:`, error);
+      toast({
+        title: "Erro ao abrir foto",
+        description: `Nao foi possivel abrir o seletor de imagem da ${target} agora.`,
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleStorePhotoSelection = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    try {
+      const file = event.target.files?.[0];
+
+      if (!file) {
+        return;
+      }
+
+      if (!userId) {
+        throw new Error("Faca login novamente para trocar a foto da loja.");
+      }
+
+      validateImageFile(file);
+      setIsUploadingStorePhoto(true);
+
+      const imagePath = buildStoreAssetPath(userId, "profile", file.name);
+      const { error: uploadError } = await supabase.storage
+        .from(STORE_IMAGE_BUCKET)
+        .upload(imagePath, file, { upsert: true });
+
+      if (uploadError) {
+        throw uploadError;
+      }
+
+      const {
+        data: { publicUrl },
+      } = supabase.storage.from(STORE_IMAGE_BUCKET).getPublicUrl(imagePath);
+
+      const { error: updateError } = await supabase
+        .from("profiles")
+        .update({ avatar_url: publicUrl })
+        .eq("id", userId);
+
+      if (updateError) {
+        throw updateError;
+      }
+
+      queryClient.invalidateQueries({ queryKey: ["user-profile-shop"] });
+      queryClient.invalidateQueries({ queryKey: ["user-profile"] });
+      queryClient.invalidateQueries({ queryKey: ["user-profile-settings"] });
+      queryClient.invalidateQueries({ queryKey: ["store_offers"] });
+      queryClient.invalidateQueries({ queryKey: ["store-details", userId] });
+
+      toast({
+        title: "Foto atualizada!",
+        description: "A nova foto da loja ja esta salva.",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Erro ao enviar foto",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setIsUploadingStorePhoto(false);
+
+      if (storePhotoInputRef.current) {
+        storePhotoInputRef.current.value = "";
+      }
+    }
+  };
+
+  const handleOfferPhotoSelection = (event: React.ChangeEvent<HTMLInputElement>) => {
+    try {
+      const file = event.target.files?.[0];
+
+      if (!file) {
+        return;
+      }
+
+      validateImageFile(file);
+
+      if (offerImagePreviewUrl) {
+        URL.revokeObjectURL(offerImagePreviewUrl);
+      }
+
+      setSelectedOfferImage(file);
+      setOfferImagePreviewUrl(URL.createObjectURL(file));
+    } catch (error: any) {
+      toast({
+        title: "Erro ao selecionar foto",
+        description: error.message,
+        variant: "destructive",
+      });
+      clearSelectedOfferImage();
+    }
+  };
 
   const handleSignOut = async () => {
     await supabase.auth.signOut();
@@ -70,14 +234,34 @@ const AdminLoja = () => {
 
   
   const addOfferMutation = useMutation({
-    mutationFn: async (newOffer: any) => {
-      const { data, error } = await supabase.from("store_offers").insert([newOffer]);
+    mutationFn: async ({ imageFile, ...newOffer }: any) => {
+      let imageUrl = profile?.avatar_url || getDefaultStoreAvatar();
+
+      if (imageFile) {
+        const imagePath = buildStoreAssetPath(newOffer.user_id, "offers", imageFile.name);
+        const { error: uploadError } = await supabase.storage
+          .from(STORE_IMAGE_BUCKET)
+          .upload(imagePath, imageFile, { upsert: true });
+
+        if (uploadError) throw uploadError;
+
+        const {
+          data: { publicUrl },
+        } = supabase.storage.from(STORE_IMAGE_BUCKET).getPublicUrl(imagePath);
+
+        imageUrl = publicUrl;
+      }
+
+      const { data, error } = await supabase
+        .from("store_offers")
+        .insert([{ ...newOffer, image: imageUrl }]);
       if (error) throw error;
       return data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["my_store_offers"] });
       queryClient.invalidateQueries({ queryKey: ["store_offers"] });
+      clearSelectedOfferImage();
       setIsAddingOffer(false);
       toast({ title: "Oferta no Ar! 🚀", description: "Os motoboys já podem ver seu produto." });
     },
@@ -122,7 +306,7 @@ const AdminLoja = () => {
       old_price: formData.get("old_price") ? Number(formData.get("old_price")) : null,
       discount: formData.get("discount") || null,
       whatsapp: profile?.phone || "",
-      image: profile?.avatar_url || getDefaultStoreAvatar(),
+      imageFile: selectedOfferImage,
       distance: "1.2 km",
       rating: "5.0"
     });
@@ -157,23 +341,55 @@ const AdminLoja = () => {
       <main className="p-4 space-y-6 max-w-4xl mx-auto mt-4">
         
         <div className="mb-2 flex items-center gap-4">
-           <div className="h-16 w-16 overflow-hidden rounded-2xl border border-yellow-500/20 bg-zinc-900">
-             <img
-               src={profile?.avatar_url || getDefaultStoreAvatar()}
-               alt={myShopName}
-               className="h-full w-full object-cover"
+           <div className="relative">
+             <input
+               ref={storePhotoInputRef}
+               type="file"
+               accept="image/*"
+               capture="environment"
+               className="hidden"
+               onChange={handleStorePhotoSelection}
              />
+             <button
+               type="button"
+               onClick={() => openImagePicker(storePhotoInputRef, "loja")}
+               className="group relative h-16 w-16 overflow-hidden rounded-2xl border border-yellow-500/20 bg-zinc-900 transition-colors hover:border-yellow-500"
+             >
+               {isUploadingStorePhoto ? (
+                 <div className="flex h-full w-full items-center justify-center">
+                   <Loader2 className="h-5 w-5 animate-spin text-yellow-500" />
+                 </div>
+               ) : (
+                 <img
+                   src={profile?.avatar_url || getDefaultStoreAvatar()}
+                   alt={myShopName}
+                   className="h-full w-full object-cover"
+                 />
+               )}
+               <div className="absolute bottom-1 right-1 rounded-full bg-black/80 p-1.5 text-yellow-500">
+                 <Camera className="h-3.5 w-3.5" />
+               </div>
+             </button>
            </div>
            <div>
              <h1 className="text-2xl font-black text-white">{myShopName}</h1>
              <p className="text-zinc-400 text-sm">Gerencie sua vitrine para a comunidade de entregadores.</p>
-             <button
-               type="button"
-               onClick={() => navigate("/profile")}
-               className="mt-1 text-xs font-bold text-yellow-500 hover:underline"
-             >
-               Editar foto e dados da loja
-             </button>
+             <div className="mt-1 flex flex-wrap gap-3 text-xs font-bold">
+               <button
+                 type="button"
+                 onClick={() => openImagePicker(storePhotoInputRef, "loja")}
+                 className="text-yellow-500 hover:underline"
+               >
+                 Trocar foto da loja
+               </button>
+               <button
+                 type="button"
+                 onClick={() => navigate("/profile")}
+                 className="text-zinc-400 hover:text-white hover:underline"
+               >
+                 Editar dados da loja
+               </button>
+             </div>
            </div>
         </div>
 
@@ -232,7 +448,16 @@ const AdminLoja = () => {
             <h2 className="text-xl font-bold">Sua Vitrine</h2>
           </div>
           
-          <Sheet open={isAddingOffer} onOpenChange={setIsAddingOffer}>
+          <Sheet
+            open={isAddingOffer}
+            onOpenChange={(open) => {
+              setIsAddingOffer(open);
+
+              if (!open) {
+                clearSelectedOfferImage();
+              }
+            }}
+          >
             <SheetTrigger asChild>
               <Button className="bg-yellow-500 text-black font-bold hover:bg-yellow-600 shadow-lg shadow-yellow-500/20">
                 <Plus className="h-4 w-4 mr-2" /> Anunciar Produto
@@ -284,8 +509,54 @@ const AdminLoja = () => {
                 </div>
 
                 <div className="space-y-2">
-                  <Label>Imagem da Loja</Label>
-                  <Input value={profile?.avatar_url || "Use a foto salva no perfil"} className="bg-zinc-900 border-zinc-800 text-zinc-400 text-xs" disabled />
+                  <Label>Foto do Produto</Label>
+
+                  {offerImagePreviewUrl && (
+                    <div className="relative overflow-hidden rounded-2xl border border-zinc-800 bg-black">
+                      <img
+                        src={offerImagePreviewUrl}
+                        alt="Preview do produto"
+                        className="h-48 w-full object-cover"
+                      />
+                      <button
+                        type="button"
+                        onClick={clearSelectedOfferImage}
+                        className="absolute right-3 top-3 rounded-full bg-black/80 p-2 text-white transition-colors hover:bg-red-600"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                  )}
+
+                  <input
+                    ref={offerPhotoInputRef}
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    className="hidden"
+                    onChange={handleOfferPhotoSelection}
+                  />
+
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="border-zinc-800 bg-black text-zinc-300 hover:bg-zinc-800"
+                      onClick={() => openImagePicker(offerPhotoInputRef, "produto")}
+                    >
+                      <ImagePlus className="mr-2 h-4 w-4" />
+                      Foto do Produto
+                    </Button>
+                    {selectedOfferImage && (
+                      <span className="truncate text-xs text-zinc-500">
+                        {selectedOfferImage.name}
+                      </span>
+                    )}
+                  </div>
+
+                  <p className="text-xs text-zinc-500">
+                    Se nao enviar uma foto, a oferta usa a foto atual da loja.
+                  </p>
                 </div>
 
                 <Button type="submit" disabled={addOfferMutation.isPending} className="w-full bg-yellow-500 text-black font-black mt-4 h-12 uppercase tracking-widest hover:bg-yellow-400">
