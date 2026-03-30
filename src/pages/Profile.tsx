@@ -1,294 +1,456 @@
-import { useState, useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
-import { User, LogOut, Camera, FileText, Phone, Store, AtSign, Loader2, Save, Bike, UploadCloud } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  ArrowLeft,
+  AtSign,
+  Bike,
+  Camera,
+  FileText,
+  Loader2,
+  LogOut,
+  Phone,
+  Save,
+  Store,
+  User,
+} from "lucide-react";
+
 import NavBar from "@/components/NavBar";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { Card, CardContent } from "@/components/ui/card";
+import { supabase } from "@/integrations/supabase/client";
+
+const PROFILE_IMAGE_BUCKET = "rotacerta_images";
+const MAX_PROFILE_IMAGE_SIZE = 5 * 1024 * 1024;
+const PROFILE_PHOTO_INPUT_ID = "profile-photo-upload";
+
+const getReturnPath = (userType?: string | null) => {
+  if (userType === "motopecas") {
+    return "/admin-loja";
+  }
+
+  if (userType === "frete") {
+    return "/admin-fretes";
+  }
+
+  return "/home";
+};
 
 const Profile = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const fileInputRef = useRef<HTMLInputElement>(null); 
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [formData, setFormData] = useState({
-    fullName: "",
-    username: "",
+    avatarUrl: "",
     document: "",
+    fullName: "",
     phone: "",
-    avatarUrl: ""
+    username: "",
   });
+  const [isUploading, setIsUploading] = useState(false);
 
-  const [isUploading, setIsUploading] = useState(false); 
-
-  
   const { data: profile, isLoading } = useQuery({
-    queryKey: ['user-profile-settings'],
+    queryKey: ["user-profile-settings"],
     queryFn: async () => {
-      const { data: { user } } = await supabase.auth.getUser();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
       if (!user) {
-        navigate('/login');
+        navigate("/login");
         return null;
       }
-      const { data, error } = await supabase.from('profiles').select('*').eq('id', user.id).single();
-      if (error) throw error;
+
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("id", user.id)
+        .single();
+
+      if (error) {
+        throw error;
+      }
+
       return { ...data, user };
-    }
+    },
   });
 
   useEffect(() => {
-    if (profile) {
-      setFormData({
-        fullName: profile.full_name || "",
-        username: profile.username || "",
-        document: profile.document || "",
-        phone: profile.phone || "",
-        avatarUrl: profile.avatar_url || ""
-      });
+    if (!profile) {
+      return;
     }
+
+    setFormData({
+      avatarUrl: profile.avatar_url || "",
+      document: profile.document || "",
+      fullName: profile.full_name || "",
+      phone: profile.phone || "",
+      username: profile.username || "",
+    });
   }, [profile]);
 
-  
+  const userType =
+    typeof profile?.user_type === "string"
+      ? profile.user_type
+      : typeof profile?.user?.user_metadata?.user_type === "string"
+        ? profile.user.user_metadata.user_type
+        : null;
+
+  const isMotoboy = userType === "motoboy";
+  const isStoreAccount = userType === "motopecas" || userType === "frete";
+  const pageTitle = isStoreAccount ? "Perfil da Loja" : "Meu Perfil";
+  const returnPath = getReturnPath(userType);
+
   const handleImageUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     try {
-      if (!event.target.files || event.target.files.length === 0) {
+      const file = event.target.files?.[0];
+
+      if (!file) {
         return;
       }
+
+      if (!file.type.startsWith("image/")) {
+        toast({
+          title: "Formato invalido",
+          description: "Escolha uma imagem JPG, PNG ou WEBP.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      if (file.size > MAX_PROFILE_IMAGE_SIZE) {
+        toast({
+          title: "Arquivo muito grande",
+          description: "A imagem deve ter no maximo 5MB.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      if (!profile?.user?.id) {
+        throw new Error("Usuario nao logado.");
+      }
+
       setIsUploading(true);
-      const file = event.target.files[0];
-      
-    
-      if (!file.type.startsWith('image/')) {
-        toast({ title: "Formato inválido", description: "Por favor, escolha uma imagem (JPG, PNG).", variant: "destructive" });
-        return;
-      }
-      if (file.size > 5 * 1024 * 1024) {
-        toast({ title: "Arquivo muito grande", description: "A imagem deve ter no máximo 5MB.", variant: "destructive" });
-        return;
-      }
 
-      if (!profile?.user?.id) throw new Error("Usuário não logado");
-
-    
-      const fileExt = file.name.split('.').pop();
-      const fileName = `${profile.user.id}-${Math.random()}.${fileExt}`;
-      const filePath = `${fileName}`;
-
+      const fileExt = file.name.split(".").pop()?.toLowerCase() || "jpg";
+      const filePath = `profiles/${profile.user.id}/${crypto.randomUUID()}.${fileExt}`;
 
       const { error: uploadError } = await supabase.storage
-        .from('rotacerta_images')
+        .from(PROFILE_IMAGE_BUCKET)
         .upload(filePath, file, { upsert: true });
 
       if (uploadError) {
-          throw uploadError;
+        throw uploadError;
       }
 
-     
-      const { data: { publicUrl } } = supabase.storage
-        .from('rotacerta_images')
-        .getPublicUrl(filePath);
+      const {
+        data: { publicUrl },
+      } = supabase.storage.from(PROFILE_IMAGE_BUCKET).getPublicUrl(filePath);
 
-     
-      setFormData(prev => ({ ...prev, avatarUrl: publicUrl }));
-      
-     
-      await supabase.from('profiles').update({ avatar_url: publicUrl }).eq('id', profile.user.id);
-      
-      queryClient.invalidateQueries({ queryKey: ['user-profile'] });
-      toast({ title: "Sucesso!", description: "Foto de perfil atualizada." });
+      const { error: updateError } = await supabase
+        .from("profiles")
+        .update({ avatar_url: publicUrl })
+        .eq("id", profile.user.id);
 
+      if (updateError) {
+        throw updateError;
+      }
+
+      setFormData((previous) => ({ ...previous, avatarUrl: publicUrl }));
+
+      queryClient.invalidateQueries({ queryKey: ["user-profile"] });
+      queryClient.invalidateQueries({ queryKey: ["user-profile-settings"] });
+      queryClient.invalidateQueries({ queryKey: ["user-profile-shop"] });
+      queryClient.invalidateQueries({ queryKey: ["store_offers"] });
+      queryClient.invalidateQueries({ queryKey: ["store-details", profile.user.id] });
+
+      toast({
+        title: "Foto atualizada",
+        description: isStoreAccount
+          ? "A nova foto da loja ja esta salva."
+          : "Sua foto de perfil foi atualizada.",
+      });
     } catch (error: any) {
-      toast({ title: "Erro no Upload", description: error.message, variant: "destructive" });
+      toast({
+        title: "Erro no upload",
+        description: error.message,
+        variant: "destructive",
+      });
     } finally {
       setIsUploading(false);
-     
-      if(fileInputRef.current) fileInputRef.current.value = ""; 
+
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
     }
   };
 
-
   const updateProfileMutation = useMutation({
-    mutationFn: async (newData: any) => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("Não autenticado");
+    mutationFn: async (newData: typeof formData) => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
 
-      const { error } = await supabase
-        .from('profiles')
+      if (!user) {
+        throw new Error("Nao autenticado.");
+      }
+
+      const { error: profileError } = await supabase
+        .from("profiles")
         .update({
-          full_name: newData.fullName,
-          username: newData.username,
-          document: newData.document,
-          phone: newData.phone,
-        
           avatar_url: newData.avatarUrl,
+          document: newData.document,
+          full_name: newData.fullName,
+          phone: newData.phone,
+          username: isMotoboy ? newData.username : null,
         })
-        .eq('id', user.id);
+        .eq("id", user.id);
 
-      if (error) throw error;
+      if (profileError) {
+        throw profileError;
+      }
+
+      if (isStoreAccount) {
+        const { error: offersError } = await supabase
+          .from("store_offers")
+          .update({ whatsapp: newData.phone })
+          .eq("user_id", user.id);
+
+        if (offersError) {
+          throw offersError;
+        }
+      }
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['user-profile-settings'] });
-      queryClient.invalidateQueries({ queryKey: ['user-profile'] }); 
-      toast({ title: "Perfil Atualizado! 💾", description: "Seus dados foram salvos com sucesso." });
+      queryClient.invalidateQueries({ queryKey: ["user-profile-settings"] });
+      queryClient.invalidateQueries({ queryKey: ["user-profile"] });
+      queryClient.invalidateQueries({ queryKey: ["user-profile-shop"] });
+      queryClient.invalidateQueries({ queryKey: ["store_offers"] });
+      queryClient.invalidateQueries({ queryKey: ["store-details", profile?.user?.id] });
+
+      toast({
+        title: "Perfil atualizado",
+        description: isStoreAccount
+          ? "Os dados da loja e o WhatsApp das ofertas foram atualizados."
+          : "Seus dados foram salvos com sucesso.",
+      });
     },
     onError: (error: any) => {
-      toast({ title: "Erro ao salvar", description: error.message, variant: "destructive" });
-    }
+      toast({
+        title: "Erro ao salvar",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
   });
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
-    queryClient.clear(); 
-    navigate('/login');
-    toast({ title: "Desconectado", description: "Você saiu da sua conta em segurança." });
+    queryClient.clear();
+    navigate("/login");
+    toast({
+      title: "Desconectado",
+      description: "Voce saiu da sua conta com seguranca.",
+    });
   };
 
-  const handleSave = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSave = (event: React.FormEvent) => {
+    event.preventDefault();
     updateProfileMutation.mutate(formData);
   };
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-black flex items-center justify-center">
-        <Loader2 className="w-10 h-10 text-yellow-500 animate-spin" />
+      <div className="flex min-h-screen items-center justify-center bg-black">
+        <Loader2 className="h-10 w-10 animate-spin text-yellow-500" />
       </div>
     );
   }
 
-  const isMotoboy = profile?.user_type === 'motoboy';
-
   return (
-    <div className="min-h-screen bg-black text-white pb-24 font-sans">
-      <div className="bg-zinc-950 p-4 flex justify-between items-center border-b border-yellow-500/20 sticky top-0 z-20">
-        <h1 className="text-xl font-bold text-white flex items-center gap-2">
-          <User className="h-6 w-6 text-yellow-500" />
-          Meu Perfil
+    <div className="min-h-screen bg-black pb-24 font-sans text-white">
+      <div className="sticky top-0 z-20 flex items-center justify-between border-b border-yellow-500/20 bg-zinc-950 p-4">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => navigate(returnPath)}
+          className="gap-2 text-zinc-300 hover:bg-white/5 hover:text-white"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          Voltar
+        </Button>
+        <h1 className="flex items-center gap-2 text-lg font-bold text-white">
+          {isStoreAccount ? (
+            <Store className="h-5 w-5 text-yellow-500" />
+          ) : (
+            <User className="h-5 w-5 text-yellow-500" />
+          )}
+          {pageTitle}
         </h1>
-        <Button variant="ghost" size="sm" onClick={handleLogout} className="text-red-500 hover:text-red-400 hover:bg-red-500/10 font-bold gap-2">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={handleLogout}
+          className="gap-2 text-red-500 hover:bg-red-500/10 hover:text-red-400"
+        >
           <LogOut className="h-4 w-4" /> Sair
         </Button>
       </div>
 
-      <main className="p-4 space-y-6 max-w-md mx-auto mt-4">
-        
-       
+      <main className="mx-auto mt-4 max-w-md space-y-6 p-4">
         <div className="flex flex-col items-center justify-center space-y-4">
-          <div className="relative group cursor-pointer" onClick={() => fileInputRef.current?.click()}>
-            
-            
-            <input 
-              type="file" 
-              accept="image/*" 
-              className="hidden" 
-              ref={fileInputRef} 
-              onChange={handleImageUpload} 
+          <label htmlFor={PROFILE_PHOTO_INPUT_ID} className="group relative cursor-pointer">
+            <input
+              id={PROFILE_PHOTO_INPUT_ID}
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={handleImageUpload}
             />
 
-            <div className="h-28 w-28 rounded-full bg-zinc-900 border-2 border-yellow-500 overflow-hidden flex items-center justify-center shadow-lg shadow-yellow-500/20 group-hover:border-white transition-colors">
+            <div className="flex h-28 w-28 items-center justify-center overflow-hidden rounded-full border-2 border-yellow-500 bg-zinc-900 shadow-lg shadow-yellow-500/20 transition-colors group-hover:border-white">
               {isUploading ? (
-                 <Loader2 className="w-8 h-8 text-yellow-500 animate-spin" />
+                <Loader2 className="h-8 w-8 animate-spin text-yellow-500" />
               ) : formData.avatarUrl ? (
-                <img src={formData.avatarUrl} alt="Avatar" className="h-full w-full object-cover group-hover:opacity-70 transition-opacity" />
+                <img
+                  src={formData.avatarUrl}
+                  alt={isStoreAccount ? "Foto da loja" : "Avatar"}
+                  className="h-full w-full object-cover transition-opacity group-hover:opacity-70"
+                />
+              ) : isStoreAccount ? (
+                <Store className="h-12 w-12 text-zinc-600 transition-colors group-hover:text-white" />
               ) : (
-                <User className="h-12 w-12 text-zinc-600 group-hover:text-white transition-colors" />
+                <User className="h-12 w-12 text-zinc-600 transition-colors group-hover:text-white" />
               )}
             </div>
-            
-            <div className="absolute bottom-0 right-0 bg-yellow-500 p-2 rounded-full text-black shadow-lg border-2 border-black group-hover:bg-white group-hover:scale-110 transition-all">
+
+            <div className="absolute bottom-0 right-0 rounded-full border-2 border-black bg-yellow-500 p-2 text-black shadow-lg transition-all group-hover:scale-110 group-hover:bg-white">
               <Camera className="h-4 w-4" />
             </div>
-          </div>
+          </label>
 
           <div className="text-center">
             <h2 className="text-xl font-black">{formData.fullName || "Sem Nome"}</h2>
-            <p className="text-xs text-zinc-500 uppercase font-bold flex items-center justify-center gap-1 mt-1">
-              {isMotoboy ? <Bike className="h-3 w-3" /> : <Store className="h-3 w-3" />}
+            <p className="mt-1 flex items-center justify-center gap-1 text-xs font-bold uppercase text-zinc-500">
+              {isStoreAccount ? (
+                <Store className="h-3 w-3" />
+              ) : (
+                <Bike className="h-3 w-3" />
+              )}
               {profile?.email}
             </p>
           </div>
         </div>
 
-        <Card className="bg-zinc-900 border-zinc-800">
+        <Card className="border-zinc-800 bg-zinc-900">
           <CardContent className="p-4">
             <form onSubmit={handleSave} className="space-y-4">
-              
               <div className="space-y-2">
-                <Label className="text-zinc-400 text-xs uppercase font-bold">{isMotoboy ? "Nome Completo" : "Nome da Empresa"}</Label>
+                <Label className="text-xs font-bold uppercase text-zinc-400">
+                  {isStoreAccount ? "Nome da Empresa" : "Nome Completo"}
+                </Label>
                 <div className="relative">
-                  {isMotoboy ? <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500" /> : <Store className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500" />}
-                  <Input 
-                    className="bg-black border-zinc-800 pl-10 text-white" 
+                  {isStoreAccount ? (
+                    <Store className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
+                  ) : (
+                    <User className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
+                  )}
+                  <Input
+                    className="border-zinc-800 bg-black pl-10 text-white"
                     value={formData.fullName}
-                    onChange={(e) => setFormData({...formData, fullName: e.target.value})}
+                    onChange={(event) =>
+                      setFormData({ ...formData, fullName: event.target.value })
+                    }
                   />
                 </div>
               </div>
 
               {isMotoboy && (
                 <div className="space-y-2">
-                  <Label className="text-zinc-400 text-xs uppercase font-bold">Nome de Usuário (Comunidade)</Label>
+                  <Label className="text-xs font-bold uppercase text-zinc-400">
+                    Nome de Usuario (Comunidade)
+                  </Label>
                   <div className="relative">
-                    <AtSign className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-yellow-500" />
-                    <Input 
+                    <AtSign className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-yellow-500" />
+                    <Input
                       placeholder="Ex: joao_motoca"
-                      className="bg-black border-zinc-800 pl-10 text-white" 
+                      className="border-zinc-800 bg-black pl-10 text-white"
                       value={formData.username}
-                      onChange={(e) => setFormData({...formData, username: e.target.value})}
+                      onChange={(event) =>
+                        setFormData({ ...formData, username: event.target.value })
+                      }
                     />
                   </div>
                 </div>
               )}
 
               <div className="space-y-2">
-                <Label className="text-zinc-400 text-xs uppercase font-bold">{isMotoboy ? "CPF" : "CNPJ"}</Label>
+                <Label className="text-xs font-bold uppercase text-zinc-400">
+                  {isStoreAccount ? "CNPJ" : "CPF"}
+                </Label>
                 <div className="relative">
-                  <FileText className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500" />
-                  <Input 
-                    placeholder={isMotoboy ? "000.000.000-00" : "00.000.000/0001-00"}
-                    className="bg-black border-zinc-800 pl-10 text-white" 
+                  <FileText className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
+                  <Input
+                    placeholder={isStoreAccount ? "00.000.000/0001-00" : "000.000.000-00"}
+                    className="border-zinc-800 bg-black pl-10 text-white"
                     value={formData.document}
-                    onChange={(e) => setFormData({...formData, document: e.target.value})}
+                    onChange={(event) =>
+                      setFormData({ ...formData, document: event.target.value })
+                    }
                   />
                 </div>
               </div>
 
               <div className="space-y-2">
-                <Label className="text-zinc-400 text-xs uppercase font-bold">Telefone / WhatsApp</Label>
+                <Label className="text-xs font-bold uppercase text-zinc-400">
+                  Telefone / WhatsApp
+                </Label>
                 <div className="relative">
-                  <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-green-500" />
-                  <Input 
+                  <Phone className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-green-500" />
+                  <Input
                     placeholder="(11) 99999-9999"
-                    className="bg-black border-zinc-800 pl-10 text-white" 
+                    className="border-zinc-800 bg-black pl-10 text-white"
                     value={formData.phone}
-                    onChange={(e) => setFormData({...formData, phone: e.target.value})}
+                    onChange={(event) =>
+                      setFormData({ ...formData, phone: event.target.value })
+                    }
                   />
                 </div>
+                {isStoreAccount && (
+                  <p className="text-xs text-zinc-500">
+                    Esse e o numero que o motoboy abre ao tocar no produto na area Lojas.
+                  </p>
+                )}
               </div>
 
-             
               <div className="pt-4">
-                <Button 
-                  type="submit" 
-                  disabled={updateProfileMutation.isPending || isUploading} 
-                  className="w-full bg-yellow-500 text-black font-black uppercase tracking-widest h-12 shadow-lg shadow-yellow-500/20 hover:bg-yellow-400"
+                <Button
+                  type="submit"
+                  disabled={updateProfileMutation.isPending || isUploading}
+                  className="h-12 w-full bg-yellow-500 font-black uppercase tracking-widest text-black shadow-lg shadow-yellow-500/20 hover:bg-yellow-400"
                 >
-                  {updateProfileMutation.isPending ? <Loader2 className="h-5 w-5 animate-spin" /> : <><Save className="h-5 w-5 mr-2" /> Salvar Alterações</>}
+                  {updateProfileMutation.isPending ? (
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                  ) : (
+                    <>
+                      <Save className="mr-2 h-5 w-5" /> Salvar Alteracoes
+                    </>
+                  )}
                 </Button>
               </div>
-
             </form>
           </CardContent>
         </Card>
-
       </main>
 
-      <NavBar />
+      {isMotoboy ? <NavBar /> : null}
     </div>
   );
 };

@@ -1,17 +1,29 @@
 import { useEffect, useRef, useState } from "react";
-import { 
-  Plus, Store, Tag, Trash2, TrendingUp, Users, MessageCircle, Package, Loader2, LogOut, Camera, ImagePlus, X
+import {
+  ImagePlus,
+  Loader2,
+  LogOut,
+  MessageCircle,
+  Package,
+  Plus,
+  Store,
+  Tag,
+  Trash2,
+  TrendingUp,
+  Users,
+  X,
 } from "lucide-react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
-import { useToast } from "@/hooks/use-toast";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 
-import { Card, CardContent } from "@/components/ui/card";
+import { supabase } from "@/integrations/supabase/client";
+import { useToast } from "@/hooks/use-toast";
+import { getDefaultStoreAvatar } from "@/lib/store";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
 import {
   Sheet,
   SheetContent,
@@ -20,27 +32,24 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
-import { getDefaultStoreAvatar } from "@/lib/store";
 
+const CATEGORIES = ["Oleo", "Pneus", "Freios", "Servicos", "Acessorios"];
 const STORE_IMAGE_BUCKET = "rotacerta_images";
 const MAX_STORE_IMAGE_SIZE = 5 * 1024 * 1024;
+const OFFER_PHOTO_INPUT_ID = "store-offer-photo-upload";
 
-const buildStoreAssetPath = (userId: string, scope: "profile" | "offers", fileName: string) => {
+const buildOfferImagePath = (userId: string, fileName: string) => {
   const fileExt = fileName.split(".").pop()?.toLowerCase() || "jpg";
-  return `stores/${userId}/${scope}-${crypto.randomUUID()}.${fileExt}`;
+  return `stores/${userId}/offers-${crypto.randomUUID()}.${fileExt}`;
 };
-
-const CATEGORIES = ["Óleo", "Pneus", "Freios", "Serviços", "Acessórios"];
 
 const AdminLoja = () => {
   const [isAddingOffer, setIsAddingOffer] = useState(false);
   const [selectedOfferImage, setSelectedOfferImage] = useState<File | null>(null);
   const [offerImagePreviewUrl, setOfferImagePreviewUrl] = useState("");
-  const [isUploadingStorePhoto, setIsUploadingStorePhoto] = useState(false);
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
-  const storePhotoInputRef = useRef<HTMLInputElement>(null);
   const offerPhotoInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -51,20 +60,34 @@ const AdminLoja = () => {
     };
   }, [offerImagePreviewUrl]);
 
- 
   const { data: profile } = useQuery({
-    queryKey: ['user-profile-shop'],
+    queryKey: ["user-profile-shop"],
     queryFn: async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return null;
-      const { data, error } = await supabase.from('profiles').select('*').eq('id', user.id).single();
-      if (error && error.code !== 'PGRST116') throw error;
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) {
+        return null;
+      }
+
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("id", user.id)
+        .single();
+
+      if (error && error.code !== "PGRST116") {
+        throw error;
+      }
+
       return { ...data, user };
-    }
+    },
   });
 
-  const myShopName = profile?.full_name || "Motopeças Parceira";
+  const myShopName = profile?.full_name || "Motopecas Parceira";
   const userId = profile?.user?.id;
+  const storeWhatsapp = (profile?.phone || "").trim();
 
   const clearSelectedOfferImage = () => {
     if (offerImagePreviewUrl) {
@@ -86,100 +109,6 @@ const AdminLoja = () => {
 
     if (file.size > MAX_STORE_IMAGE_SIZE) {
       throw new Error("A foto precisa ter no maximo 5MB.");
-    }
-  };
-
-  const openImagePicker = (
-    inputRef: React.RefObject<HTMLInputElement>,
-    target: "loja" | "produto",
-  ) => {
-    const input = inputRef.current as (HTMLInputElement & { showPicker?: () => void }) | null;
-
-    if (!input) {
-      toast({
-        title: "Erro ao abrir foto",
-        description: `Nao foi possivel abrir o seletor de imagem da ${target} agora.`,
-        variant: "destructive",
-      });
-      return;
-    }
-
-    try {
-      if (typeof input.showPicker === "function") {
-        input.showPicker();
-        return;
-      }
-
-      input.click();
-    } catch (error) {
-      console.error(`Erro ao abrir o seletor de foto da ${target}:`, error);
-      toast({
-        title: "Erro ao abrir foto",
-        description: `Nao foi possivel abrir o seletor de imagem da ${target} agora.`,
-        variant: "destructive",
-      });
-    }
-  };
-
-  const handleStorePhotoSelection = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    try {
-      const file = event.target.files?.[0];
-
-      if (!file) {
-        return;
-      }
-
-      if (!userId) {
-        throw new Error("Faca login novamente para trocar a foto da loja.");
-      }
-
-      validateImageFile(file);
-      setIsUploadingStorePhoto(true);
-
-      const imagePath = buildStoreAssetPath(userId, "profile", file.name);
-      const { error: uploadError } = await supabase.storage
-        .from(STORE_IMAGE_BUCKET)
-        .upload(imagePath, file, { upsert: true });
-
-      if (uploadError) {
-        throw uploadError;
-      }
-
-      const {
-        data: { publicUrl },
-      } = supabase.storage.from(STORE_IMAGE_BUCKET).getPublicUrl(imagePath);
-
-      const { error: updateError } = await supabase
-        .from("profiles")
-        .update({ avatar_url: publicUrl })
-        .eq("id", userId);
-
-      if (updateError) {
-        throw updateError;
-      }
-
-      queryClient.invalidateQueries({ queryKey: ["user-profile-shop"] });
-      queryClient.invalidateQueries({ queryKey: ["user-profile"] });
-      queryClient.invalidateQueries({ queryKey: ["user-profile-settings"] });
-      queryClient.invalidateQueries({ queryKey: ["store_offers"] });
-      queryClient.invalidateQueries({ queryKey: ["store-details", userId] });
-
-      toast({
-        title: "Foto atualizada!",
-        description: "A nova foto da loja ja esta salva.",
-      });
-    } catch (error: any) {
-      toast({
-        title: "Erro ao enviar foto",
-        description: error.message,
-        variant: "destructive",
-      });
-    } finally {
-      setIsUploadingStorePhoto(false);
-
-      if (storePhotoInputRef.current) {
-        storePhotoInputRef.current.value = "";
-      }
     }
   };
 
@@ -213,37 +142,43 @@ const AdminLoja = () => {
     await supabase.auth.signOut();
     queryClient.clear();
     navigate("/login");
-    toast({ title: "Sessão encerrada", description: "Você saiu com segurança." });
+    toast({
+      title: "Sessao encerrada",
+      description: "Voce saiu com seguranca.",
+    });
   };
 
- 
   const { data: myOffers = [], isLoading } = useQuery({
     queryKey: ["my_store_offers", userId],
-    enabled: !!userId,
+    enabled: Boolean(userId),
     queryFn: async () => {
       const { data, error } = await supabase
         .from("store_offers")
         .select("*")
-        .eq("user_id", userId) 
+        .eq("user_id", userId)
         .order("created_at", { ascending: false });
-      
-      if (error) throw error;
+
+      if (error) {
+        throw error;
+      }
+
       return data || [];
     },
   });
 
-  
   const addOfferMutation = useMutation({
     mutationFn: async ({ imageFile, ...newOffer }: any) => {
       let imageUrl = profile?.avatar_url || getDefaultStoreAvatar();
 
       if (imageFile) {
-        const imagePath = buildStoreAssetPath(newOffer.user_id, "offers", imageFile.name);
+        const imagePath = buildOfferImagePath(newOffer.user_id, imageFile.name);
         const { error: uploadError } = await supabase.storage
           .from(STORE_IMAGE_BUCKET)
           .upload(imagePath, imageFile, { upsert: true });
 
-        if (uploadError) throw uploadError;
+        if (uploadError) {
+          throw uploadError;
+        }
 
         const {
           data: { publicUrl },
@@ -255,7 +190,11 @@ const AdminLoja = () => {
       const { data, error } = await supabase
         .from("store_offers")
         .insert([{ ...newOffer, image: imageUrl }]);
-      if (error) throw error;
+
+      if (error) {
+        throw error;
+      }
+
       return data;
     },
     onSuccess: () => {
@@ -263,17 +202,25 @@ const AdminLoja = () => {
       queryClient.invalidateQueries({ queryKey: ["store_offers"] });
       clearSelectedOfferImage();
       setIsAddingOffer(false);
-      toast({ title: "Oferta no Ar! 🚀", description: "Os motoboys já podem ver seu produto." });
+      toast({
+        title: "Oferta no ar",
+        description: "Os motoboys ja podem ver seu produto.",
+      });
     },
-    onError: (error) => {
-      toast({ title: "Erro", description: error.message, variant: "destructive" });
-    }
+    onError: (error: any) => {
+      toast({
+        title: "Erro",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
   });
 
- 
   const deleteOfferMutation = useMutation({
     mutationFn: async (id: string) => {
-      if (!userId) throw new Error("Usuário não autenticado");
+      if (!userId) {
+        throw new Error("Usuario nao autenticado.");
+      }
 
       const { error } = await supabase
         .from("store_offers")
@@ -281,22 +228,38 @@ const AdminLoja = () => {
         .eq("id", id)
         .eq("user_id", userId);
 
-      if (error) throw error;
+      if (error) {
+        throw error;
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["my_store_offers"] });
       queryClient.invalidateQueries({ queryKey: ["store_offers"] });
-      toast({ title: "Oferta removida", description: "O produto foi retirado da vitrine." });
+      toast({
+        title: "Oferta removida",
+        description: "O produto foi retirado da vitrine.",
+      });
     },
   });
 
-  
-  const handleAddOffer = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    if (!userId) return;
+  const handleAddOffer = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
 
-    const formData = new FormData(e.currentTarget);
-    
+    if (!userId) {
+      return;
+    }
+
+    if (!storeWhatsapp) {
+      toast({
+        title: "Cadastre o WhatsApp da loja",
+        description: "Preencha o numero em Editar perfil da loja antes de publicar.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const formData = new FormData(event.currentTarget);
+
     addOfferMutation.mutate({
       user_id: userId,
       shop: myShopName,
@@ -305,149 +268,127 @@ const AdminLoja = () => {
       price: Number(formData.get("price")),
       old_price: formData.get("old_price") ? Number(formData.get("old_price")) : null,
       discount: formData.get("discount") || null,
-      whatsapp: profile?.phone || "",
+      whatsapp: storeWhatsapp,
       imageFile: selectedOfferImage,
       distance: "1.2 km",
-      rating: "5.0"
+      rating: "5.0",
     });
   };
 
   return (
-    <div className="min-h-screen bg-black text-white pb-24 font-sans">
-      
-      
-      <div className="bg-zinc-950 p-4 flex justify-between items-center border-b border-yellow-500/20 sticky top-0 z-20">
+    <div className="min-h-screen bg-black pb-24 font-sans text-white">
+      <div className="sticky top-0 z-20 flex items-center justify-between border-b border-yellow-500/20 bg-zinc-950 p-4">
         <div className="flex items-center gap-2">
           <Store className="h-6 w-6 text-yellow-500" />
-          <span className="text-white text-lg font-black tracking-tight">PAINEL MOTOPEÇAS</span>
+          <span className="text-lg font-black tracking-tight text-white">PAINEL MOTOPECAS</span>
         </div>
         <div className="flex items-center gap-2">
-          <Badge 
-            onClick={() => toast({ 
-              title: "🚀 Rota Certa PRO", 
-              description: "Funcionalidade em desenvolvimento. Em breve você terá relatórios detalhados e destaque no topo!",
-              variant: "default" 
-            })}
-            className="bg-yellow-500 text-black font-bold border-none hover:bg-yellow-600 cursor-pointer"
+          <Badge
+            onClick={() =>
+              toast({
+                title: "Rota Certa PRO",
+                description:
+                  "Funcionalidade em desenvolvimento. Em breve voce tera relatorios e destaque no topo.",
+              })
+            }
+            className="cursor-pointer border-none bg-yellow-500 font-bold text-black hover:bg-yellow-600"
           >
             PLANO PRO
           </Badge>
-          <Button variant="ghost" size="sm" onClick={handleSignOut} className="text-red-500 hover:bg-red-500/10 hover:text-red-400 gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleSignOut}
+            className="gap-2 text-red-500 hover:bg-red-500/10 hover:text-red-400"
+          >
             <LogOut className="h-4 w-4" /> Sair
           </Button>
         </div>
       </div>
 
-      <main className="p-4 space-y-6 max-w-4xl mx-auto mt-4">
-        
+      <main className="mx-auto mt-4 max-w-4xl space-y-6 p-4">
         <div className="mb-2 flex items-center gap-4">
-           <div className="relative">
-             <input
-               ref={storePhotoInputRef}
-               type="file"
-               accept="image/*"
-               capture="environment"
-               className="hidden"
-               onChange={handleStorePhotoSelection}
-             />
-             <button
-               type="button"
-               onClick={() => openImagePicker(storePhotoInputRef, "loja")}
-               className="group relative h-16 w-16 overflow-hidden rounded-2xl border border-yellow-500/20 bg-zinc-900 transition-colors hover:border-yellow-500"
-             >
-               {isUploadingStorePhoto ? (
-                 <div className="flex h-full w-full items-center justify-center">
-                   <Loader2 className="h-5 w-5 animate-spin text-yellow-500" />
-                 </div>
-               ) : (
-                 <img
-                   src={profile?.avatar_url || getDefaultStoreAvatar()}
-                   alt={myShopName}
-                   className="h-full w-full object-cover"
-                 />
-               )}
-               <div className="absolute bottom-1 right-1 rounded-full bg-black/80 p-1.5 text-yellow-500">
-                 <Camera className="h-3.5 w-3.5" />
-               </div>
-             </button>
-           </div>
-           <div>
-             <h1 className="text-2xl font-black text-white">{myShopName}</h1>
-             <p className="text-zinc-400 text-sm">Gerencie sua vitrine para a comunidade de entregadores.</p>
-             <div className="mt-1 flex flex-wrap gap-3 text-xs font-bold">
-               <button
-                 type="button"
-                 onClick={() => openImagePicker(storePhotoInputRef, "loja")}
-                 className="text-yellow-500 hover:underline"
-               >
-                 Trocar foto da loja
-               </button>
-               <button
-                 type="button"
-                 onClick={() => navigate("/profile")}
-                 className="text-zinc-400 hover:text-white hover:underline"
-               >
-                 Editar dados da loja
-               </button>
-             </div>
-           </div>
+          <div className="h-16 w-16 overflow-hidden rounded-2xl border border-yellow-500/20 bg-zinc-900">
+            <img
+              src={profile?.avatar_url || getDefaultStoreAvatar()}
+              alt={myShopName}
+              className="h-full w-full object-cover"
+            />
+          </div>
+          <div>
+            <h1 className="text-2xl font-black text-white">{myShopName}</h1>
+            <p className="text-sm text-zinc-400">
+              Gerencie sua vitrine para a comunidade de entregadores.
+            </p>
+            <button
+              type="button"
+              onClick={() => navigate("/profile")}
+              className="mt-1 text-xs font-bold text-yellow-500 hover:underline"
+            >
+              Editar perfil da loja
+            </button>
+          </div>
         </div>
 
-        
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <Card className="bg-zinc-900 border-zinc-800">
-            <CardContent className="p-4 flex flex-col items-center text-center gap-2">
-              <div className="p-2 bg-yellow-500/10 rounded-full"><Package className="h-5 w-5 text-yellow-500" /></div>
+        <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+          <Card className="border-zinc-800 bg-zinc-900">
+            <CardContent className="flex flex-col items-center gap-2 p-4 text-center">
+              <div className="rounded-full bg-yellow-500/10 p-2">
+                <Package className="h-5 w-5 text-yellow-500" />
+              </div>
               <div>
                 <p className="text-2xl font-black text-white">{isLoading ? "-" : myOffers.length}</p>
-                <p className="text-[10px] text-zinc-400 uppercase font-bold">Ofertas Ativas</p>
+                <p className="text-[10px] font-bold uppercase text-zinc-400">Ofertas Ativas</p>
               </div>
             </CardContent>
           </Card>
-          
-<Card className="bg-zinc-900 border-zinc-800">
-  <CardContent className="p-4 flex flex-col items-center text-center gap-2">
-    <div className="p-2 bg-green-500/10 rounded-full"><MessageCircle className="h-5 w-5 text-green-500" /></div>
-    <div>
-      <p className="text-2xl font-black text-white">
-        
-        {myOffers.reduce((acc: number, offer: any) => acc + (offer.whatsapp_clicks || 0), 0)}
-      </p>
-      <p className="text-[10px] text-zinc-400 uppercase font-bold">Cliques WhatsApp</p>
-    </div>
-  </CardContent>
-</Card>
 
+          <Card className="border-zinc-800 bg-zinc-900">
+            <CardContent className="flex flex-col items-center gap-2 p-4 text-center">
+              <div className="rounded-full bg-green-500/10 p-2">
+                <MessageCircle className="h-5 w-5 text-green-500" />
+              </div>
+              <div>
+                <p className="text-2xl font-black text-white">
+                  {myOffers.reduce((acc: number, offer: any) => acc + (offer.whatsapp_clicks || 0), 0)}
+                </p>
+                <p className="text-[10px] font-bold uppercase text-zinc-400">Cliques WhatsApp</p>
+              </div>
+            </CardContent>
+          </Card>
 
-<Card className="bg-zinc-900 border-zinc-800 hidden md:flex">
-  <CardContent className="p-4 flex flex-col items-center text-center gap-2 w-full">
-    <div className="p-2 bg-blue-500/10 rounded-full"><Users className="h-5 w-5 text-blue-500" /></div>
-    <div>
-      <p className="text-2xl font-black text-white">
-       
-        {myOffers.reduce((acc: number, offer: any) => acc + (offer.views || 0), 0)}
-      </p>
-      <p className="text-[10px] text-zinc-400 uppercase font-bold">Visualizações</p>
-    </div>
-  </CardContent>
-</Card>
-          <Card className="bg-zinc-900 border-zinc-800 hidden md:flex">
-            <CardContent className="p-4 flex flex-col items-center text-center gap-2 w-full">
-              <div className="p-2 bg-purple-500/10 rounded-full"><TrendingUp className="h-5 w-5 text-purple-500" /></div>
+          <Card className="hidden border-zinc-800 bg-zinc-900 md:flex">
+            <CardContent className="flex w-full flex-col items-center gap-2 p-4 text-center">
+              <div className="rounded-full bg-blue-500/10 p-2">
+                <Users className="h-5 w-5 text-blue-500" />
+              </div>
+              <div>
+                <p className="text-2xl font-black text-white">
+                  {myOffers.reduce((acc: number, offer: any) => acc + (offer.views || 0), 0)}
+                </p>
+                <p className="text-[10px] font-bold uppercase text-zinc-400">Visualizacoes</p>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="hidden border-zinc-800 bg-zinc-900 md:flex">
+            <CardContent className="flex w-full flex-col items-center gap-2 p-4 text-center">
+              <div className="rounded-full bg-purple-500/10 p-2">
+                <TrendingUp className="h-5 w-5 text-purple-500" />
+              </div>
               <div>
                 <p className="text-2xl font-black text-white">Alto</p>
-                <p className="text-[10px] text-zinc-400 uppercase font-bold">Engajamento</p>
+                <p className="text-[10px] font-bold uppercase text-zinc-400">Engajamento</p>
               </div>
             </CardContent>
           </Card>
         </div>
 
-        
-        <div className="flex justify-between items-center mt-8">
+        <div className="mt-8 flex items-center justify-between">
           <div>
             <h2 className="text-xl font-bold">Sua Vitrine</h2>
           </div>
-          
+
           <Sheet
             open={isAddingOffer}
             onOpenChange={(open) => {
@@ -459,52 +400,85 @@ const AdminLoja = () => {
             }}
           >
             <SheetTrigger asChild>
-              <Button className="bg-yellow-500 text-black font-bold hover:bg-yellow-600 shadow-lg shadow-yellow-500/20">
-                <Plus className="h-4 w-4 mr-2" /> Anunciar Produto
+              <Button className="bg-yellow-500 font-bold text-black shadow-lg shadow-yellow-500/20 hover:bg-yellow-600">
+                <Plus className="mr-2 h-4 w-4" /> Anunciar Produto
               </Button>
             </SheetTrigger>
-            <SheetContent className="bg-zinc-950 text-white border-l border-yellow-500/20 overflow-y-auto sm:max-w-md">
+            <SheetContent className="overflow-y-auto border-l border-yellow-500/20 bg-zinc-950 text-white sm:max-w-md">
               <SheetHeader>
-                <SheetTitle className="text-yellow-500 flex items-center gap-2">
+                <SheetTitle className="flex items-center gap-2 text-yellow-500">
                   <Tag className="h-5 w-5" /> Nova Oferta
                 </SheetTitle>
                 <SheetDescription className="text-zinc-400">
                   Preencha os dados. O produto vai aparecer na hora pro motoboy.
                 </SheetDescription>
               </SheetHeader>
-              
-              <form onSubmit={handleAddOffer} className="space-y-4 mt-6">
+
+              <form onSubmit={handleAddOffer} className="mt-6 space-y-4">
                 <div className="space-y-2">
-                  <Label>O que você está vendendo?</Label>
-                  <Input name="name" placeholder="Ex: Pneu Michelin City Pro 90/90-18" className="bg-black border-zinc-800 text-white" required />
+                  <Label>O que voce esta vendendo?</Label>
+                  <Input
+                    name="name"
+                    placeholder="Ex: Pneu Michelin City Pro 90/90-18"
+                    className="border-zinc-800 bg-black text-white"
+                    required
+                  />
                 </div>
 
                 <div className="space-y-2">
                   <Label>Categoria</Label>
-                  <select name="category" className="w-full bg-black border border-zinc-800 rounded-md h-10 px-3 text-white text-sm">
-                    {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                  <select
+                    name="category"
+                    className="h-10 w-full rounded-md border border-zinc-800 bg-black px-3 text-sm text-white"
+                  >
+                    {CATEGORIES.map((category) => (
+                      <option key={category} value={category}>
+                        {category}
+                      </option>
+                    ))}
                   </select>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label className="text-yellow-500">Preço Atual (R$)</Label>
-                    <Input name="price" type="number" step="0.01" placeholder="Ex: 219.90" className="bg-black border-yellow-500/50 text-white font-bold" required />
+                    <Label className="text-yellow-500">Preco Atual (R$)</Label>
+                    <Input
+                      name="price"
+                      type="number"
+                      step="0.01"
+                      placeholder="Ex: 219.90"
+                      className="border-yellow-500/50 bg-black font-bold text-white"
+                      required
+                    />
                   </div>
                   <div className="space-y-2">
-                    <Label className="text-zinc-500">Preço Antigo (Opcional)</Label>
-                    <Input name="old_price" type="number" step="0.01" placeholder="Ex: 260.00" className="bg-black border-zinc-800 text-white" />
+                    <Label className="text-zinc-500">Preco Antigo (Opcional)</Label>
+                    <Input
+                      name="old_price"
+                      type="number"
+                      step="0.01"
+                      placeholder="Ex: 260.00"
+                      className="border-zinc-800 bg-black text-white"
+                    />
                   </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label>Tag de Desconto</Label>
-                    <Input name="discount" placeholder="Ex: 15% OFF" className="bg-black border-zinc-800 text-white" />
+                    <Input
+                      name="discount"
+                      placeholder="Ex: 15% OFF"
+                      className="border-zinc-800 bg-black text-white"
+                    />
                   </div>
                   <div className="space-y-2">
                     <Label>WhatsApp da Loja</Label>
-                    <Input value={profile?.phone || ""} className="bg-zinc-900 border-zinc-800 text-zinc-400" disabled />
+                    <Input
+                      value={storeWhatsapp || "Cadastre em Editar perfil da loja"}
+                      className="border-zinc-800 bg-zinc-900 text-zinc-400"
+                      disabled
+                    />
                   </div>
                 </div>
 
@@ -529,10 +503,10 @@ const AdminLoja = () => {
                   )}
 
                   <input
+                    id={OFFER_PHOTO_INPUT_ID}
                     ref={offerPhotoInputRef}
                     type="file"
                     accept="image/*"
-                    capture="environment"
                     className="hidden"
                     onChange={handleOfferPhotoSelection}
                   />
@@ -541,16 +515,16 @@ const AdminLoja = () => {
                     <Button
                       type="button"
                       variant="outline"
+                      asChild
                       className="border-zinc-800 bg-black text-zinc-300 hover:bg-zinc-800"
-                      onClick={() => openImagePicker(offerPhotoInputRef, "produto")}
                     >
-                      <ImagePlus className="mr-2 h-4 w-4" />
-                      Foto do Produto
+                      <label htmlFor={OFFER_PHOTO_INPUT_ID}>
+                        <ImagePlus className="mr-2 h-4 w-4" />
+                        Foto do Produto
+                      </label>
                     </Button>
                     {selectedOfferImage && (
-                      <span className="truncate text-xs text-zinc-500">
-                        {selectedOfferImage.name}
-                      </span>
+                      <span className="truncate text-xs text-zinc-500">{selectedOfferImage.name}</span>
                     )}
                   </div>
 
@@ -559,66 +533,94 @@ const AdminLoja = () => {
                   </p>
                 </div>
 
-                <Button type="submit" disabled={addOfferMutation.isPending} className="w-full bg-yellow-500 text-black font-black mt-4 h-12 uppercase tracking-widest hover:bg-yellow-400">
-                  {addOfferMutation.isPending ? <Loader2 className="w-5 h-5 animate-spin" /> : "Publicar Oferta"}
+                <Button
+                  type="submit"
+                  disabled={addOfferMutation.isPending}
+                  className="mt-4 h-12 w-full bg-yellow-500 font-black uppercase tracking-widest text-black hover:bg-yellow-400"
+                >
+                  {addOfferMutation.isPending ? (
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                  ) : (
+                    "Publicar Oferta"
+                  )}
                 </Button>
               </form>
             </SheetContent>
           </Sheet>
         </div>
 
-        
-        <div className="space-y-4 mt-6">
+        <div className="mt-6 space-y-4">
           {isLoading ? (
-            <div className="flex justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-yellow-500" /></div>
+            <div className="flex justify-center py-12">
+              <Loader2 className="h-8 w-8 animate-spin text-yellow-500" />
+            </div>
           ) : myOffers.length === 0 ? (
-            <div className="text-center py-12 bg-zinc-900/50 rounded-xl border border-dashed border-zinc-700">
-              <Store className="h-12 w-12 text-zinc-600 mx-auto mb-3" />
-              <p className="text-zinc-400 font-medium">Sua vitrine está vazia.</p>
-              <p className="text-xs text-zinc-500 mt-1">Clique em "Anunciar Produto" para começar a vender.</p>
+            <div className="rounded-xl border border-dashed border-zinc-700 bg-zinc-900/50 py-12 text-center">
+              <Store className="mx-auto mb-3 h-12 w-12 text-zinc-600" />
+              <p className="font-medium text-zinc-400">Sua vitrine esta vazia.</p>
+              <p className="mt-1 text-xs text-zinc-500">
+                Clique em "Anunciar Produto" para comecar a vender.
+              </p>
             </div>
           ) : (
             myOffers.map((offer: any) => (
-              <Card key={offer.id} className="bg-zinc-900 border-zinc-800 overflow-hidden flex flex-col sm:flex-row">
-                <div className="w-full sm:w-32 h-32 relative">
-                  <img src={offer.image} alt={offer.name} className="w-full h-full object-cover" />
+              <Card
+                key={offer.id}
+                className="flex flex-col overflow-hidden border-zinc-800 bg-zinc-900 sm:flex-row"
+              >
+                <div className="relative h-32 w-full sm:w-32">
+                  <img src={offer.image} alt={offer.name} className="h-full w-full object-cover" />
                   {offer.discount && (
-                    <Badge className="absolute top-2 left-2 bg-red-600 text-white text-[10px] border-none">
+                    <Badge className="absolute left-2 top-2 border-none bg-red-600 text-[10px] text-white">
                       {offer.discount}
                     </Badge>
                   )}
                 </div>
-                <div className="p-4 flex-1 flex flex-col justify-between">
-                  <div className="flex justify-between items-start">
+                <div className="flex flex-1 flex-col justify-between p-4">
+                  <div className="flex items-start justify-between">
                     <div>
-                      <Badge variant="outline" className="border-zinc-700 text-zinc-400 mb-2 text-[10px]">{offer.category}</Badge>
-                      <h3 className="font-bold text-white text-sm leading-tight">{offer.name}</h3>
+                      <Badge
+                        variant="outline"
+                        className="mb-2 border-zinc-700 text-[10px] text-zinc-400"
+                      >
+                        {offer.category}
+                      </Badge>
+                      <h3 className="text-sm font-bold leading-tight text-white">{offer.name}</h3>
                     </div>
-                   
-                    <Button 
-                      variant="ghost" 
-                      size="icon" 
-                      className="text-zinc-500 hover:text-red-500 hover:bg-red-500/10"
+
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="text-zinc-500 hover:bg-red-500/10 hover:text-red-500"
                       onClick={() => {
-                        if(window.confirm("Tem certeza que deseja apagar esta oferta?")) {
+                        if (window.confirm("Tem certeza que deseja apagar esta oferta?")) {
                           deleteOfferMutation.mutate(offer.id);
                         }
                       }}
                       disabled={deleteOfferMutation.isPending}
                     >
-                      {deleteOfferMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                      {deleteOfferMutation.isPending ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Trash2 className="h-4 w-4" />
+                      )}
                     </Button>
                   </div>
                   <div className="mt-3 flex items-end gap-2">
-                    <span className="text-lg font-black text-yellow-500">R$ {Number(offer.price).toFixed(2)}</span>
-                    {offer.old_price && <span className="text-xs text-zinc-500 line-through mb-1">R$ {Number(offer.old_price).toFixed(2)}</span>}
+                    <span className="text-lg font-black text-yellow-500">
+                      R$ {Number(offer.price).toFixed(2)}
+                    </span>
+                    {offer.old_price && (
+                      <span className="mb-1 text-xs text-zinc-500 line-through">
+                        R$ {Number(offer.old_price).toFixed(2)}
+                      </span>
+                    )}
                   </div>
                 </div>
               </Card>
             ))
           )}
         </div>
-
       </main>
     </div>
   );
