@@ -22,6 +22,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import { syncFirebasePushUser } from "@/lib/firebase";
 
 const PROFILE_IMAGE_BUCKET = "rotacerta_images";
 const MAX_PROFILE_IMAGE_SIZE = 5 * 1024 * 1024;
@@ -251,13 +252,19 @@ const Profile = () => {
   });
 
   const handleLogout = async () => {
-    await supabase.auth.signOut();
-    queryClient.clear();
-    navigate("/login");
-    toast({
-      title: "Desconectado",
-      description: "Voce saiu da sua conta com seguranca.",
-    });
+    try {
+      await syncFirebasePushUser(null, null);
+    } catch (error) {
+      console.error("Erro ao limpar o token do Firebase no logout:", error);
+    } finally {
+      await supabase.auth.signOut();
+      queryClient.clear();
+      navigate("/login");
+      toast({
+        title: "Desconectado",
+        description: "Voce saiu da sua conta com seguranca.",
+      });
+    }
   };
 
   const handleSave = (event: React.FormEvent) => {
@@ -456,3 +463,4 @@ const Profile = () => {
 };
 
 export default Profile;
+

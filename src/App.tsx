@@ -17,12 +17,12 @@ import Register from "@/components/Register";
 import TabOnboardingDialog from "@/components/TabOnboardingDialog";
 import Welcome from "@/components/Welcome";
 import { Toaster } from "@/components/ui/toaster";
-import { supabase } from "@/integrations/supabase/client";
 import {
-  ensureOneSignalInitialized,
-  promptPushPermissionOnce,
-  syncOneSignalUser,
-} from "@/lib/onesignal";
+  ensureFirebaseMessagingInitialized,
+  promptFirebasePushPermissionOnce,
+  syncFirebasePushUser,
+} from "@/lib/firebase";
+import { supabase } from "@/integrations/supabase/client";
 import {
   isAndroidNativePushAvailable,
   promptAndroidNativePushPermissionOnce,
@@ -327,7 +327,7 @@ function App() {
 
   useEffect(() => {
     if (!isAndroidNativePushAvailable() && "serviceWorker" in navigator) {
-      navigator.serviceWorker.register("/service-worker.js").catch((error) => {
+      navigator.serviceWorker.register("/firebase-messaging-sw.js").catch((error) => {
         console.error("Falha ao registrar o service worker:", error);
       });
     }
@@ -400,8 +400,8 @@ function App() {
             return;
           }
 
-          await ensureOneSignalInitialized();
-          await syncOneSignalUser(null, null);
+          await ensureFirebaseMessagingInitialized();
+          await syncFirebasePushUser(null, null);
           return;
         }
 
@@ -417,11 +417,11 @@ function App() {
           return;
         }
 
-        await ensureOneSignalInitialized();
-        await syncOneSignalUser(userId, userType);
-        await promptPushPermissionOnce(userType);
+        await ensureFirebaseMessagingInitialized();
+        await syncFirebasePushUser(userId, userType);
+        await promptFirebasePushPermissionOnce(userType);
       } catch (error) {
-        console.warn("Nao foi possivel sincronizar o OneSignal:", error);
+        console.warn("Nao foi possivel sincronizar o Firebase Cloud Messaging:", error);
       }
     };
 
@@ -431,7 +431,7 @@ function App() {
         syncPushIdentity(session?.user?.id, session?.user?.user_metadata?.user_type),
       )
       .catch((error) => {
-        console.warn("Nao foi possivel carregar a sessao para o OneSignal:", error);
+        console.warn("Nao foi possivel carregar a sessao para o Firebase Cloud Messaging:", error);
       });
 
     const {
